@@ -1,0 +1,28 @@
+/* Fichier : app.overlay */
+
+/* 1. Les Dictionnaires indispensables (Includes) */
+#include <zephyr/dt-bindings/adc/adc.h>      /* Pour ADC_GAIN_1_6, etc. */
+#include <zephyr/dt-bindings/adc/nrf-adc.h>  /* Pour NRF_SAADC_AIN0 ! C'est lui qui manquait */
+
+/ {
+	zephyr,user {
+		io-channels = <&adc 0>;
+	};
+};
+
+&adc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@0 {
+		reg = <0>; 
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		/* Note : On a retiré la résolution ici, on la définit dans le main.c */
+		
+		compatible = "zephyr,adc-channel";
+		zephyr,input-positive = <NRF_SAADC_AIN0>; 
+	};
+};
