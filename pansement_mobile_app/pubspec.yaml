@@ -1,0 +1,39 @@
+name: pansement_mobile_app
+description: Application mobile pour pansements connectés
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # BLE (Bluetooth Low Energy)
+  flutter_blue_plus: ^1.31.0
+  permission_handler: ^11.0.1
+  
+  # HTTP & API
+  dio: ^5.4.0
+  flutter_secure_storage: ^9.0.0
+  
+  # State Management
+  flutter_riverpod: ^2.4.0
+  
+  # UI & Charts
+  fl_chart: ^0.65.0
+  
+  # Utils
+  intl: ^0.18.1
+  logger: ^2.0.2
+  uuid: ^4.2.2
+  shared_preferences: ^2.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,39 @@
+name: pansement_dashboard
+description: Dashboard web pour pansements connectés
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # HTTP & API
+  dio: ^5.4.0
+  flutter_secure_storage: ^9.0.0
+  
+  # State Management
+  flutter_riverpod: ^2.4.0
+  
+  # UI Components
+  fl_chart: ^0.65.0
+  data_table_2: ^2.5.11
+  
+  # Utils
+  intl: ^0.18.1
+  logger: ^2.0.2
+  google_fonts: ^6.1.0
+  shared_preferences: ^2.2.2
+  
+  # Routing
+  go_router: ^13.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

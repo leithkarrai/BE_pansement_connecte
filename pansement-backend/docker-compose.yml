@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: .
+    container_name: pansement_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Utiliser les conteneurs existants via le réseau Docker
+      DATABASE_URL: postgresql://postgres:postgres_password_change_me@pansement_postgres:5432/pansement_connecte
+      REDIS_HOST: pansement_redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis_password_change_me
+      MINIO_ENDPOINT: pansement_minio
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin_password_change_me
+    volumes:
+      - ./app:/app/app
+    networks:
+      - pansement_network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+networks:
+  pansement_network:
+    external: true
+    name: pansement-connecte-db_pansement_network
