@@ -1,8 +1,8 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../providers/ble_provider.dart';
+import '../providers/auth_provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 class MeasurementsScreen extends ConsumerStatefulWidget {
@@ -18,8 +18,7 @@ class MeasurementsScreen extends ConsumerStatefulWidget {
 }
 
 class _MeasurementsScreenState extends ConsumerState<MeasurementsScreen> {
-  StreamSubscription<Map<String, double>>? _measurementsSubscription;
-  final List<Map<String, double>> _measurementsHistory = [];
+  final List<Map<String, dynamic>> _measurementsHistory = [];
   bool _isStreaming = false;
 
   @override
@@ -43,9 +42,10 @@ class _MeasurementsScreenState extends ConsumerState<MeasurementsScreen> {
       _isStreaming = true;
     });
 
+    // Les notifications sont gérées automatiquement via les callbacks
+    // du BleService après la connexion
     final bleService = ref.read(bleServiceProvider);
-    _measurementsSubscription =
-        bleService.subscribeMeasurements(widget.device).listen((measurements) {
+    bleService.onDataReceived = (measurements) {
       if (mounted) {
         setState(() {
           _measurementsHistory.add(measurements);
@@ -55,11 +55,10 @@ class _MeasurementsScreenState extends ConsumerState<MeasurementsScreen> {
           }
         });
       }
-    });
+    };
   }
 
   void _stopStreaming() {
-    _measurementsSubscription?.cancel();
     setState(() {
       _isStreaming = false;
     });
@@ -67,12 +66,31 @@ class _MeasurementsScreenState extends ConsumerState<MeasurementsScreen> {
 
   @override
   void dispose() {
-    _measurementsSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final user = ref.watch(authProvider).user;
+    final role = user?.role ?? '';
+    final isPatient = role == 'patient';
+    if (isPatient) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Mesures en temps réel'),
+        ),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text(
+              'Accès réservé aux médecins et administrateurs.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
     final lastMeasurement =
         _measurementsHistory.isNotEmpty ? _measurementsHistory.last : null;
 
@@ -130,7 +148,7 @@ class _MeasurementsScreenState extends ConsumerState<MeasurementsScreen> {
     );
   }
 
-  Widget _buildMeasurementsView(Map<String, double> lastMeasurement) {
+  Widget _buildMeasurementsView(Map<String, dynamic> lastMeasurement) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(

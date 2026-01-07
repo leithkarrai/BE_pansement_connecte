@@ -19,67 +19,36 @@ class DeviceConnectionScreen extends ConsumerStatefulWidget {
 
 class _DeviceConnectionScreenState
     extends ConsumerState<DeviceConnectionScreen> {
-  bool _isConnecting = false;
-  bool _isConnected = false;
-  bool _isReading = false;
-  Map<String, double>? _measurements;
-  String? _error;
+  void _showSnack(String message, {Color? color}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+      ),
+    );
+  }
 
   @override
   void initState() {
     super.initState();
-    _connectToDevice();
-  }
-
-  Future<void> _connectToDevice() async {
-    setState(() {
-      _isConnecting = true;
-      _error = null;
+    // Connecter automatiquement au device
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(deviceConnectionProvider(widget.device).notifier).connect();
     });
-
-    try {
-      final bleService = ref.read(bleServiceProvider);
-      await bleService.connectToDevice(widget.device);
-
-      setState(() {
-        _isConnecting = false;
-        _isConnected = true;
-      });
-
-      // Lire les mesures automatiquement après connexion
-      await _readMeasurements();
-    } catch (e) {
-      setState(() {
-        _isConnecting = false;
-        _error = e.toString();
-      });
-    }
   }
 
   Future<void> _readMeasurements() async {
-    setState(() {
-      _isReading = true;
-      _error = null;
-    });
-
-    try {
-      final bleService = ref.read(bleServiceProvider);
-      final measurements = await bleService.readMeasurements(widget.device);
-
-      setState(() {
-        _measurements = measurements;
-        _isReading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isReading = false;
-        _error = 'Erreur lecture: ${e.toString()}';
-      });
-    }
+    await ref
+        .read(deviceConnectionProvider(widget.device).notifier)
+        .readMeasurements();
   }
 
   Future<void> _sendToServer() async {
-    if (_measurements == null) return;
+    final connectionState = ref.read(deviceConnectionProvider(widget.device));
+    final measurements = connectionState.measurements;
+
+    if (measurements == null) return;
 
     try {
       final apiService = ref.read(apiServiceProvider);
@@ -94,67 +63,57 @@ class _DeviceConnectionScreenState
       final deviceId = widget.device.remoteId.toString();
 
       // Envoyer température
-      if (_measurements!.containsKey('temperature')) {
+      if (measurements.containsKey('temperature')) {
         await apiService.createMeasurement(
           deviceId: deviceId,
           measurementType: 'temperature',
-          value: _measurements!['temperature']!,
+          value: (measurements['temperature'] as num).toDouble(),
           unit: '°C',
           qualityScore: 95,
         );
+        if (!mounted) return;
       }
 
       // Envoyer humidité
-      if (_measurements!.containsKey('humidity')) {
+      if (measurements.containsKey('humidity')) {
         await apiService.createMeasurement(
           deviceId: deviceId,
           measurementType: 'humidity',
-          value: _measurements!['humidity']!,
+          value: (measurements['humidity'] as num).toDouble(),
           unit: '%',
           qualityScore: 95,
         );
+        if (!mounted) return;
       }
 
       // Envoyer pH
-      if (_measurements!.containsKey('ph')) {
+      if (measurements.containsKey('ph')) {
         await apiService.createMeasurement(
           deviceId: deviceId,
           measurementType: 'ph',
-          value: _measurements!['ph']!,
+          value: (measurements['ph'] as num).toDouble(),
           unit: '',
           qualityScore: 95,
         );
+        if (!mounted) return;
       }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Mesures envoyées au serveur'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      _showSnack('✅ Mesures envoyées au serveur', color: Colors.green);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Erreur: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showSnack('❌ Erreur: ${e.toString()}', color: Colors.red);
     }
   }
 
   @override
   void dispose() {
     // Se déconnecter en quittant
-    ref.read(bleServiceProvider).disconnectDevice(widget.device);
+    ref.read(deviceConnectionProvider(widget.device).notifier).disconnect();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final connectionState = ref.watch(deviceConnectionProvider(widget.device));
     final deviceName = widget.device.platformName.isNotEmpty
         ? widget.device.platformName
         : 'Device inconnu';
@@ -170,14 +129,20 @@ class _DeviceConnectionScreenState
           children: [
             // Statut connexion
             Card(
-              color: _isConnected ? Colors.green[50] : Colors.orange[50],
+              color: connectionState.isConnected
+                  ? Colors.green[50]
+                  : Colors.orange[50],
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Row(
                   children: [
                     Icon(
-                      _isConnected ? Icons.check_circle : Icons.sync,
-                      color: _isConnected ? Colors.green : Colors.orange,
+                      connectionState.isConnected
+                          ? Icons.check_circle
+                          : Icons.sync,
+                      color: connectionState.isConnected
+                          ? Colors.green
+                          : Colors.orange,
                       size: 32,
                     ),
                     const SizedBox(width: 16),
@@ -186,9 +151,9 @@ class _DeviceConnectionScreenState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _isConnecting
+                            connectionState.isConnecting
                                 ? 'Connexion en cours...'
-                                : _isConnected
+                                : connectionState.isConnected
                                     ? 'Connecté'
                                     : 'Déconnecté',
                             style: const TextStyle(
@@ -211,7 +176,7 @@ class _DeviceConnectionScreenState
             const SizedBox(height: 24),
 
             // Erreur
-            if (_error != null)
+            if (connectionState.error != null)
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -225,7 +190,7 @@ class _DeviceConnectionScreenState
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        _error!,
+                        connectionState.error!,
                         style: TextStyle(color: Colors.red[900]),
                       ),
                     ),
@@ -234,7 +199,7 @@ class _DeviceConnectionScreenState
               ),
 
             // Mesures
-            if (_measurements != null) ...[
+            if (connectionState.measurements != null) ...[
               Text(
                 'Mesures',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -243,8 +208,16 @@ class _DeviceConnectionScreenState
               ),
               const SizedBox(height: 16),
               _buildMeasurementCard(
+                'Valeur ADC',
+                '${connectionState.measurements!['adc_raw']?.toStringAsFixed(0) ?? '--'}',
+                '',
+                Icons.sensors,
+                Colors.blue,
+              ),
+              const SizedBox(height: 12),
+              _buildMeasurementCard(
                 'Température',
-                '${_measurements!['temperature']?.toStringAsFixed(1) ?? '--'}',
+                '${connectionState.measurements!['temperature']?.toStringAsFixed(1) ?? '--'}',
                 '°C',
                 Icons.thermostat,
                 Colors.red,
@@ -252,7 +225,7 @@ class _DeviceConnectionScreenState
               const SizedBox(height: 12),
               _buildMeasurementCard(
                 'Humidité',
-                '${_measurements!['humidity']?.toStringAsFixed(1) ?? '--'}',
+                '${connectionState.measurements!['humidity']?.toStringAsFixed(1) ?? '--'}',
                 '%',
                 Icons.water_drop,
                 Colors.blue,
@@ -260,10 +233,18 @@ class _DeviceConnectionScreenState
               const SizedBox(height: 12),
               _buildMeasurementCard(
                 'pH',
-                '${_measurements!['ph']?.toStringAsFixed(2) ?? '--'}',
+                '${connectionState.measurements!['ph']?.toStringAsFixed(2) ?? '--'}',
                 '',
                 Icons.science,
                 Colors.green,
+              ),
+              const SizedBox(height: 12),
+              _buildMeasurementCard(
+                'Statut',
+                connectionState.measurements!['status']?.toString() ?? '--',
+                '',
+                Icons.info,
+                Colors.orange,
               ),
               const SizedBox(height: 24),
               ElevatedButton.icon(
@@ -279,23 +260,26 @@ class _DeviceConnectionScreenState
             const SizedBox(height: 24),
 
             // Boutons d'action
-            if (_isConnected && _measurements == null)
+            if (connectionState.isConnected &&
+                connectionState.measurements == null)
               ElevatedButton.icon(
-                onPressed: _isReading ? null : _readMeasurements,
-                icon: _isReading
+                onPressed: connectionState.isReading ? null : _readMeasurements,
+                icon: connectionState.isReading
                     ? const SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.sensors),
-                label: Text(_isReading ? 'Lecture...' : 'Lire les mesures'),
+                label: Text(connectionState.isReading
+                    ? 'Lecture...'
+                    : 'Lire les mesures'),
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.all(16),
                 ),
               ),
 
-            if (_measurements != null)
+            if (connectionState.measurements != null)
               OutlinedButton.icon(
                 onPressed: _readMeasurements,
                 icon: const Icon(Icons.refresh),

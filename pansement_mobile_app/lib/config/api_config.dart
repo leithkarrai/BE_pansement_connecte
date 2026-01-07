@@ -1,12 +1,81 @@
-/// Configuration de l'API backend
-class ApiConfig {
-  // ⚠️ POUR MOBILE :
-  // - Android Emulator : http://10.0.2.2:8000/api/v1
-  // - iOS Simulator : http://localhost:8000/api/v1
-  // - Device physique : http://192.168.1.200:8000/api/v1 (IP de votre PC)
+import 'package:shared_preferences/shared_preferences.dart';
 
-  static const String baseUrl =
-      'http://192.168.1.200:8000/api/v1'; // Device physique - Changez cette IP si nécessaire
+/// Configuration de l'API backend avec support de configuration dynamique
+class ApiConfig {
+  // Clé pour stocker l'URL du backend dans SharedPreferences
+  static const String _backendUrlKey = 'backend_base_url';
+
+  // URL par défaut - sera utilisée si aucune URL n'est sauvegardée
+  // ⚠️ Pour l'émulateur Android : utiliser http://10.0.2.2:8000/api/v1
+  // ⚠️ Pour un appareil physique : utiliser l'IP WiFi de ton PC (pas l'IP Docker/WSL)
+  // Trouver l'IP WiFi : Windows: ipconfig | findstr IPv4 (chercher l'interface Wi-Fi)
+  // IP WiFi actuelle : 192.168.1.200
+  static const String _defaultUrl = 'http://192.168.1.200:8000/api/v1';
+
+  // URL de base - peut être changée dynamiquement
+  static String _baseUrl = _defaultUrl;
+
+  /// Récupère l'URL de base du backend
+  /// Charge depuis SharedPreferences ou utilise l'URL par défaut
+  static Future<String> getBaseUrl() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedUrl = prefs.getString(_backendUrlKey);
+      if (savedUrl != null && savedUrl.isNotEmpty) {
+        _baseUrl = savedUrl;
+      } else {
+        _baseUrl = _defaultUrl;
+      }
+    } catch (e) {
+      // En cas d'erreur, utiliser l'URL par défaut
+      _baseUrl = _defaultUrl;
+    }
+    return _baseUrl;
+  }
+
+  /// URL de base (synchrone) - utilise la valeur en cache
+  /// ⚠️ Utilisez getBaseUrl() pour charger depuis SharedPreferences
+  static String get baseUrl => _baseUrl;
+
+  /// Définit une nouvelle URL de base et la sauvegarde
+  static Future<void> setBaseUrl(String url) async {
+    try {
+      // Valider l'URL
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        throw Exception('URL invalide: doit commencer par http:// ou https://');
+      }
+
+      // Enlever le slash final si présent
+      url = url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+
+      // Sauvegarder dans SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_backendUrlKey, url);
+
+      // Mettre à jour la valeur en cache
+      _baseUrl = url;
+    } catch (e) {
+      throw Exception('Erreur lors de la sauvegarde de l\'URL: $e');
+    }
+  }
+
+  /// Réinitialise l'URL à la valeur par défaut
+  static Future<void> resetBaseUrl() async {
+    await setBaseUrl(defaultUrl);
+  }
+
+  /// Récupère l'URL sauvegardée (sans charger depuis SharedPreferences)
+  static Future<String?> getSavedBaseUrl() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_backendUrlKey);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Récupère l'URL par défaut
+  static String get defaultUrl => _defaultUrl;
 
   // Auth endpoints
   static const String login = '/auth/login';
@@ -23,19 +92,19 @@ class ApiConfig {
   static const String devices = '/devices';
   static const String measurements = '/measurements';
   static const String alerts = '/alerts';
+  static const String comments = '/comments';
 
   // Config
-  static const Duration timeout = Duration(seconds: 30);
+  static const Duration timeout =
+      Duration(seconds: 60); // Augmenté pour les connexions lentes
 
   // BLE Configuration
   static const String deviceNamePrefix =
-      'PANS'; // Pansements commencent par "PANS"
+      'Pansement'; // Nom du device dans Zephyr (CONFIG_BT_DEVICE_NAME)
 
   // GATT Services & Characteristics UUIDs
-  // ⚠️ Ces UUIDs doivent correspondre à ceux programmés dans l'ESP32
-  static const String serviceUuid = '12345678-1234-1234-1234-123456789012';
-  static const String temperatureCharUuid =
-      '12345678-1234-1234-1234-123456789013';
-  static const String humidityCharUuid = '12345678-1234-1234-1234-123456789014';
-  static const String phCharUuid = '12345678-1234-1234-1234-123456789015';
+  // ⚠️ Ces UUIDs doivent correspondre exactement à ceux du firmware Zephyr
+  // Voir: BE_pansement_connecte/BLE_pansement/src/main.c
+  static const String serviceUuid = '12345678-1234-5678-1234-56789abcdef0';
+  static const String characteristicUuid = '12345678-1234-5678-1234-56789abcdef1';
 }

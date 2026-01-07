@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/dashboard_provider.dart';
+import 'patient_comments_screen.dart';
 
 class PatientDetailScreen extends ConsumerWidget {
   final String patientId;
@@ -111,6 +112,36 @@ class PatientDetailScreen extends ConsumerWidget {
                           ],
                         ),
                       ),
+
+                      const SizedBox(height: 24),
+
+                      // Commentaires
+                      Text(
+                        'Commentaires médicaux',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      const SizedBox(height: 16),
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.comment),
+                          title: const Text('Voir les commentaires'),
+                          subtitle: const Text(
+                              'Ajouter ou consulter les commentaires du médecin'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => PatientCommentsScreen(
+                                  patientId: patient.id,
+                                  patientName: patient.fullName,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -185,13 +216,15 @@ class PatientDetailScreen extends ConsumerWidget {
                                   ),
                                 ),
                                 title: const Text('Pansement connecté'),
-                                subtitle: const Text('Aucun dispositif assigné'),
+                                subtitle:
+                                    const Text('Aucun dispositif assigné'),
                                 trailing: ElevatedButton(
                                   onPressed: () {
                                     // TODO: Assigner un dispositif
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
-                                        content: Text('Assigner dispositif - À venir'),
+                                        content: Text(
+                                            'Assigner dispositif - À venir'),
                                       ),
                                     );
                                   },

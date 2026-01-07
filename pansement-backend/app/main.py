@@ -3,12 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.database import get_db, check_db_connection, get_db_info
-from app.api import auth, users, devices, measurements, files, alerts
+from app.database import get_db, check_db_connection, get_db_info, init_db
+from app.api import auth, users, devices, measurements, files, alerts, comments
 from app.core.redis_client import test_redis_connection
 from app.core.minio_client import test_minio_connection, initialize_buckets
 # Importer les modèles pour que SQLAlchemy les charge
-from app.models import User, Device, Measurement, Alert
+from app.models import User, Device, Measurement, Alert, Comment
 
 app = FastAPI(
     title='Pansement Connecté API',
@@ -50,12 +50,18 @@ app.include_router(devices.router, tags=['Devices'])
 app.include_router(measurements.router, tags=['Measurements'])
 app.include_router(files.router, tags=['Files'])
 app.include_router(alerts.router, tags=['Alerts'])
+app.include_router(comments.router, tags=['Comments'])
 
 @app.on_event('startup')
 async def startup():
     print('🚀 Démarrage de Pansement Connecté API')
     if check_db_connection():
         print('✅ PostgreSQL connecté')
+        # Créer les tables si elles n'existent pas
+        try:
+            init_db()
+        except Exception as e:
+            print(f'⚠️  Erreur création tables: {e}')
         info = get_db_info()
         print(f'   📊 Tables: {info.get("tables", 0)}')
         print(f'   👥 Users: {info.get("users", 0)}')

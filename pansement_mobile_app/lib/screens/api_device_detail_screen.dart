@@ -631,6 +631,8 @@ class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
   Future<void> _unassignDevice(BuildContext context) async {
     debugPrint('🔄 Désassignation du device ${widget.deviceId}');
 
+    if (!mounted) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -650,6 +652,8 @@ class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
         ],
       ),
     );
+
+    if (!mounted) return;
 
     if (confirmed != true) {
       debugPrint('❌ Désassignation annulée par l\'utilisateur');
@@ -785,6 +789,8 @@ class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
           ],
         ),
       );
+
+      if (!mounted) return;
 
       if (selectedPatient == null) {
         debugPrint('❌ Aucun patient sélectionné');

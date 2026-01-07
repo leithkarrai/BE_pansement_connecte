@@ -5,7 +5,10 @@ import '../services/auth_service.dart';
 
 // Provider ApiService
 final apiServiceProvider = Provider<ApiService>((ref) {
-  return ApiService();
+  final service = ApiService();
+  // L'initialisation se fait automatiquement dans le constructeur
+  // via _initialize() qui est appelé de manière asynchrone
+  return service;
 });
 
 // Provider AuthService

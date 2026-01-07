@@ -1,8 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/home_screen.dart';
+import 'config/api_config.dart';
+import 'services/notification_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialiser le service de notifications
+  final notificationService = NotificationService();
+  await notificationService.initialize();
+  debugPrint('🔔 Service de notifications initialisé');
+
+  // Initialiser ApiConfig pour charger l'URL depuis SharedPreferences
+  final baseUrl = await ApiConfig.getBaseUrl();
+  debugPrint('🔗 URL du backend chargée: $baseUrl');
+
   runApp(
     const ProviderScope(
       child: MyApp(),

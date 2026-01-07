@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../providers/ble_provider.dart';
-import '../services/ble_service.dart';
 import '../providers/auth_provider.dart';
 import 'measurements_screen.dart';
 
@@ -22,11 +21,10 @@ class DeviceDetailScreen extends ConsumerStatefulWidget {
 class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
   BluetoothConnectionState _connectionState =
       BluetoothConnectionState.disconnected;
-  Map<String, double>? _measurements;
+  Map<String, dynamic>? _measurements;
   bool _isLoading = false;
   String? _error;
   StreamSubscription<BluetoothConnectionState>? _connectionSubscription;
-  StreamSubscription<Map<String, double>>? _measurementsSubscription;
 
   @override
   void initState() {
@@ -51,7 +49,6 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
   @override
   void dispose() {
     _connectionSubscription?.cancel();
-    _measurementsSubscription?.cancel();
     super.dispose();
   }
 
@@ -96,7 +93,6 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
     try {
       final bleService = ref.read(bleServiceProvider);
       await bleService.disconnectDevice(widget.device);
-      _measurementsSubscription?.cancel();
 
       if (mounted) {
         setState(() {
@@ -174,15 +170,16 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
       return;
     }
 
+    // Les notifications sont gérées automatiquement via les callbacks
+    // du BleService après la connexion
     final bleService = ref.read(bleServiceProvider);
-    _measurementsSubscription =
-        bleService.subscribeMeasurements(widget.device).listen((measurements) {
+    bleService.onDataReceived = (measurements) {
       if (mounted) {
         setState(() {
           _measurements = measurements;
         });
       }
-    });
+    };
   }
 
   Future<void> _sendToBackend() async {

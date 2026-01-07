@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
+import '../config/api_config.dart';
+import '../services/api_service.dart';
 import 'home_screen.dart';
 import 'register_screen.dart';
 import 'forgot_password_screen.dart';
@@ -45,12 +47,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (mounted) {
         // Afficher un message d'erreur plus clair
         String errorMessage = 'Erreur de connexion';
-        if (e.toString().contains('Impossible de se connecter')) {
-          errorMessage = e.toString().replaceFirst('Exception: ', '');
-        } else if (e.toString().contains('Email ou mot de passe')) {
-          errorMessage = e.toString().replaceFirst('Exception: ', '');
+        String errorTitle = 'Erreur de connexion';
+
+        final errorStr = e.toString();
+
+        if (errorStr.contains('Impossible de se connecter au serveur')) {
+          errorTitle = 'Connexion au serveur impossible';
+          errorMessage = errorStr.replaceFirst('Exception: ', '');
+        } else if (errorStr.contains('Email ou mot de passe')) {
+          errorTitle = 'Identifiants incorrects';
+          errorMessage = errorStr.replaceFirst('Exception: ', '');
+        } else if (errorStr.contains('Timeout')) {
+          errorTitle = 'Timeout de connexion';
+          errorMessage = errorStr.replaceFirst('Exception: ', '');
         } else {
-          errorMessage = 'Erreur: ${e.toString()}';
+          errorMessage = errorStr.replaceFirst('Exception: ', '');
         }
 
         showDialog(
@@ -63,13 +74,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
-                    'Erreur de connexion',
+                    errorTitle,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
-            content: Text(errorMessage),
+            content: SingleChildScrollView(
+              child: Text(
+                errorMessage,
+                style: const TextStyle(fontSize: 14),
+              ),
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
@@ -235,6 +251,44 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         child: const Text('Créer un compte'),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Bouton de réinitialisation URL (pour debug)
+                  TextButton.icon(
+                    onPressed: () async {
+                      try {
+                        await ApiConfig.resetBaseUrl();
+                        final apiService = ApiService();
+                        await apiService.updateBaseUrl(ApiConfig.defaultUrl);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  '✅ URL réinitialisée à la valeur par défaut'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('❌ Erreur: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text(
+                      'Réinitialiser l\'URL du backend',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.grey[600],
+                    ),
                   ),
                 ],
               ),
