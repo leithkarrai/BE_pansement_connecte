@@ -1,6 +1,7 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/foundation.dart';
+import 'navigation_service.dart';
 
 /// Service pour gérer les notifications locales
 class NotificationService {
@@ -127,7 +128,8 @@ class NotificationService {
   /// Gère le tap sur une notification
   void _onNotificationTapped(NotificationResponse response) {
     debugPrint('🔔 Notification tapée: ${response.payload}');
-    // TODO: Navigation vers l'écran approprié selon le payload
+    final navigationService = NavigationService();
+    navigationService.navigateFromNotification(response.payload);
   }
 
   /// Annule une notification

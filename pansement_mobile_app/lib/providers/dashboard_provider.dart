@@ -101,12 +101,21 @@ final dashboardStatsProvider = FutureProvider<Map<String, int>>((ref) async {
     final doctors = await apiService.getUsers(role: 'medecin');
     final devices = await apiService.getDevices();
 
+    // Calculer les patients actifs
+    final activePatients = patients.where((p) => p.isActive).length;
+
+    // Calculer les devices actifs
     final activeDevices = devices.where((d) => d.status == 'active').length;
+
+    // Calculer les devices disponibles (non assignés)
+    final availableDevices = devices.where((d) => d.patientId == null).length;
 
     return {
       'total_patients': patients.length,
+      'active_patients': activePatients,
       'total_doctors': doctors.length,
       'active_devices': activeDevices,
+      'available_devices': availableDevices,
       'today_measurements': 0, // TODO: Compter les mesures d'aujourd'hui
     };
   }
@@ -117,9 +126,15 @@ final dashboardStatsProvider = FutureProvider<Map<String, int>>((ref) async {
     // TODO: Filtrer par patients du médecin
     final devices = await apiService.getDevices();
 
+    // Calculer les patients actifs
+    final activePatients = patients.where((p) => p.isActive).length;
+
+    // Calculer les devices actifs
     final activeDevices = devices.where((d) => d.status == 'active').length;
 
     return {
+      'total_patients': patients.length,
+      'active_patients': activePatients,
       'my_patients': patients.length, // Nombre de patients assignés
       'active_devices': activeDevices,
       'alerts': 0, // TODO: Compter les alertes (mesures anormales)

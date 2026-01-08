@@ -9,8 +9,8 @@ class ApiConfig {
   // ⚠️ Pour l'émulateur Android : utiliser http://10.0.2.2:8000/api/v1
   // ⚠️ Pour un appareil physique : utiliser l'IP WiFi de ton PC (pas l'IP Docker/WSL)
   // Trouver l'IP WiFi : Windows: ipconfig | findstr IPv4 (chercher l'interface Wi-Fi)
-  // IP WiFi actuelle : 192.168.1.200
-  static const String _defaultUrl = 'http://192.168.1.200:8000/api/v1';
+  // IP WiFi actuelle : 172.16.121.161
+  static const String _defaultUrl = 'http://172.16.121.161:8000/api/v1';
 
   // URL de base - peut être changée dynamiquement
   static String _baseUrl = _defaultUrl;
@@ -106,5 +106,6 @@ class ApiConfig {
   // ⚠️ Ces UUIDs doivent correspondre exactement à ceux du firmware Zephyr
   // Voir: BE_pansement_connecte/BLE_pansement/src/main.c
   static const String serviceUuid = '12345678-1234-5678-1234-56789abcdef0';
-  static const String characteristicUuid = '12345678-1234-5678-1234-56789abcdef1';
+  static const String characteristicUuid =
+      '12345678-1234-5678-1234-56789abcdef1';
 }

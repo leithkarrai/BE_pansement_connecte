@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/auth_provider.dart';
+import '../models/device.dart';
+import '../widgets/error_widget.dart';
 import 'patient_comments_screen.dart';
+import 'create_edit_patient_screen.dart';
 
-class PatientDetailScreen extends ConsumerWidget {
+class PatientDetailScreen extends ConsumerStatefulWidget {
   final String patientId;
 
   const PatientDetailScreen({
@@ -12,7 +16,13 @@ class PatientDetailScreen extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PatientDetailScreen> createState() =>
+      _PatientDetailScreenState();
+}
+
+class _PatientDetailScreenState extends ConsumerState<PatientDetailScreen> {
+  @override
+  Widget build(BuildContext context) {
     final patientsAsync = ref.watch(patientsProvider);
 
     return Scaffold(
@@ -21,13 +31,28 @@ class PatientDetailScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.edit),
-            onPressed: () {
-              // TODO: Navigation vers édition patient
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Édition patient - À venir'),
+            onPressed: () async {
+              final patientsAsync = ref.read(patientsProvider);
+              final patients = patientsAsync.value;
+              if (patients == null) return;
+
+              final patient = patients.firstWhere(
+                (p) => p.id == widget.patientId,
+                orElse: () => throw Exception('Patient non trouvé'),
+              );
+
+              if (!mounted) return;
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CreateEditPatientScreen(patient: patient),
                 ),
               );
+              // Rafraîchir les données si le patient a été modifié
+              if (result == true && mounted) {
+                // Le provider se rafraîchira automatiquement
+                Navigator.pop(context, true); // Retourner à la liste
+              }
             },
           ),
         ],
@@ -35,7 +60,7 @@ class PatientDetailScreen extends ConsumerWidget {
       body: patientsAsync.when(
         data: (patients) {
           final patient = patients.firstWhere(
-            (p) => p.id == patientId,
+            (p) => p.id == widget.patientId,
             orElse: () => throw Exception('Patient non trouvé'),
           );
 
@@ -219,15 +244,8 @@ class PatientDetailScreen extends ConsumerWidget {
                                 subtitle:
                                     const Text('Aucun dispositif assigné'),
                                 trailing: ElevatedButton(
-                                  onPressed: () {
-                                    // TODO: Assigner un dispositif
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                            'Assigner dispositif - À venir'),
-                                      ),
-                                    );
-                                  },
+                                  onPressed: () => _showAssignDeviceDialog(
+                                      context, ref, patient.id),
                                   child: const Text('Assigner'),
                                 ),
                               ),
@@ -355,5 +373,138 @@ class PatientDetailScreen extends ConsumerWidget {
     if (parts.isEmpty) return '?';
     if (parts.length == 1) return parts[0][0].toUpperCase();
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+
+  Future<void> _showAssignDeviceDialog(
+    BuildContext context,
+    WidgetRef ref,
+    String patientId,
+  ) async {
+    try {
+      final apiService = ref.read(apiServiceProvider);
+
+      // Charger les dispositifs disponibles (non assignés)
+      final devices = await apiService.getDevices(status: 'available');
+      final availableDevices =
+          devices.where((d) => d.patientId == null).toList();
+
+      if (!mounted) return;
+
+      if (availableDevices.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Aucun dispositif disponible'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      Device? selectedDevice;
+
+      await showDialog(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Assigner un dispositif'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: availableDevices.length,
+                itemBuilder: (context, index) {
+                  final device = availableDevices[index];
+                  final isSelected = selectedDevice?.id == device.id;
+
+                  return RadioListTile<Device>(
+                    title: Text(device.serialNumber),
+                    subtitle: Text('Modèle: ${device.model}'),
+                    value: device,
+                    groupValue: selectedDevice,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        selectedDevice = value;
+                      });
+                    },
+                    selected: isSelected,
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Annuler'),
+              ),
+              ElevatedButton(
+                onPressed: selectedDevice == null
+                    ? null
+                    : () async {
+                        Navigator.pop(context);
+                        await _assignDevice(
+                            context, ref, patientId, selectedDevice!.id);
+                      },
+                child: const Text('Assigner'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ErrorSnackBar.show(
+          context,
+          '❌ Erreur lors du chargement des dispositifs',
+          suggestions: [
+            e.toString().replaceAll('Exception: ', ''),
+            'Vérifiez votre connexion internet',
+          ],
+        );
+      }
+    }
+  }
+
+  Future<void> _assignDevice(
+    BuildContext context,
+    WidgetRef ref,
+    String patientId,
+    String deviceId,
+  ) async {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      await apiService.assignDeviceToPatient(deviceId, patientId);
+
+      if (mounted) {
+        Navigator.pop(context); // Fermer le dialog de chargement
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Dispositif assigné avec succès'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Rafraîchir les données
+        ref.invalidate(patientsProvider);
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Fermer le dialog de chargement
+        ErrorSnackBar.show(
+          context,
+          '❌ Erreur lors de l\'assignation',
+          suggestions: [
+            e.toString().replaceAll('Exception: ', ''),
+            'Vérifiez votre connexion internet',
+          ],
+        );
+      }
+    }
   }
 }

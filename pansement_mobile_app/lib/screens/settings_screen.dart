@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/auth_provider.dart';
 import '../providers/notifications_provider.dart';
+import '../config/api_config.dart';
+import '../widgets/error_widget.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -134,6 +136,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   subtitle: Text(_language),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _showLanguageDialog(),
+                ),
+              ],
+            ),
+          ),
+
+          // Section Configuration
+          _buildSectionHeader('Configuration'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.settings_ethernet),
+                  title: const Text('URL du Backend'),
+                  subtitle: FutureBuilder<String>(
+                    future: ApiConfig.getBaseUrl(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasData) {
+                        return Text(
+                          snapshot.data!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        );
+                      }
+                      return const Text('Chargement...');
+                    },
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _showBackendUrlDialog(),
                 ),
               ],
             ),
@@ -316,11 +350,54 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             child: const Text('Annuler'),
           ),
           ElevatedButton(
-            onPressed: () {
-              // TODO: Appeler l'API pour mettre à jour le profil
-              Navigator.pop(context);
-              if (mounted) {
-                _showSaveSnackBar('Profil mis à jour');
+            onPressed: () async {
+              // Afficher un indicateur de chargement
+              if (!mounted) return;
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              );
+
+              try {
+                final apiService = ref.read(apiServiceProvider);
+                await apiService.updateProfile(
+                  firstName: firstNameController.text.trim().isNotEmpty
+                      ? firstNameController.text.trim()
+                      : null,
+                  lastName: lastNameController.text.trim().isNotEmpty
+                      ? lastNameController.text.trim()
+                      : null,
+                  phone: phoneController.text.trim().isNotEmpty
+                      ? phoneController.text.trim()
+                      : null,
+                );
+
+                // Mettre à jour l'utilisateur dans le provider
+                await ref.read(authProvider.notifier).refreshUser();
+
+                if (mounted) {
+                  Navigator.pop(context); // Fermer le dialog de chargement
+                  Navigator.pop(context); // Fermer le dialog d'édition
+                  _showSaveSnackBar('✅ Profil mis à jour avec succès');
+                }
+              } catch (e) {
+                if (mounted) {
+                  Navigator.pop(context); // Fermer le dialog de chargement
+                  final errorMessage =
+                      e.toString().replaceAll('Exception: ', '');
+                  ErrorSnackBar.show(
+                    context,
+                    '❌ Erreur lors de la mise à jour du profil',
+                    suggestions: [
+                      errorMessage,
+                      'Vérifiez votre connexion internet',
+                      'Réessayez dans quelques instants',
+                    ],
+                  );
+                }
               }
             },
             child: const Text('Enregistrer'),
@@ -378,17 +455,75 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             child: const Text('Annuler'),
           ),
           ElevatedButton(
-            onPressed: () {
-              if (newPasswordController.text ==
-                  confirmPasswordController.text) {
-                // TODO: Appeler l'API pour changer le mot de passe
-                Navigator.pop(context);
+            onPressed: () async {
+              // Validation
+              if (oldPasswordController.text.isEmpty) {
                 if (mounted) {
-                  _showSaveSnackBar('Mot de passe changé');
+                  _showSaveSnackBar(
+                      'Veuillez entrer votre ancien mot de passe');
                 }
-              } else {
+                return;
+              }
+
+              if (newPasswordController.text.isEmpty) {
+                if (mounted) {
+                  _showSaveSnackBar('Veuillez entrer un nouveau mot de passe');
+                }
+                return;
+              }
+
+              if (newPasswordController.text.length < 8) {
+                if (mounted) {
+                  _showSaveSnackBar(
+                      'Le mot de passe doit contenir au moins 8 caractères');
+                }
+                return;
+              }
+
+              if (newPasswordController.text !=
+                  confirmPasswordController.text) {
                 if (mounted) {
                   _showSaveSnackBar('Les mots de passe ne correspondent pas');
+                }
+                return;
+              }
+
+              // Afficher un indicateur de chargement
+              if (!mounted) return;
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              );
+
+              try {
+                final apiService = ref.read(apiServiceProvider);
+                await apiService.changePassword(
+                  oldPassword: oldPasswordController.text,
+                  newPassword: newPasswordController.text,
+                );
+
+                if (mounted) {
+                  Navigator.pop(context); // Fermer le dialog de chargement
+                  Navigator.pop(context); // Fermer le dialog de changement
+                  _showSaveSnackBar('✅ Mot de passe changé avec succès');
+                }
+              } catch (e) {
+                if (mounted) {
+                  Navigator.pop(context); // Fermer le dialog de chargement
+                  final errorMessage =
+                      e.toString().replaceAll('Exception: ', '');
+                  ErrorSnackBar.show(
+                    context,
+                    '❌ Erreur lors du changement de mot de passe',
+                    suggestions: [
+                      errorMessage,
+                      'Vérifiez que l\'ancien mot de passe est correct',
+                      'Le nouveau mot de passe doit contenir au moins 8 caractères',
+                    ],
+                  );
                 }
               }
             },
@@ -471,6 +606,143 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               }
             },
             child: const Text('Confirmer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showBackendUrlDialog() async {
+    final urlController = TextEditingController();
+    final currentUrl = await ApiConfig.getBaseUrl();
+    urlController.text = currentUrl;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Configuration du Backend'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Modifiez l\'URL du backend si nécessaire.',
+                style: TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: urlController,
+                decoration: const InputDecoration(
+                  labelText: 'URL du Backend',
+                  hintText: 'http://192.168.1.XXX:8000/api/v1',
+                  prefixIcon: Icon(Icons.link),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () async {
+                  await ApiConfig.resetBaseUrl();
+                  urlController.text = await ApiConfig.getBaseUrl();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content:
+                            Text('URL réinitialisée à la valeur par défaut'),
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Réinitialiser à la valeur par défaut'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newUrl = urlController.text.trim();
+
+              // Validation
+              if (newUrl.isEmpty) {
+                if (mounted) {
+                  ErrorSnackBar.show(
+                    context,
+                    'L\'URL ne peut pas être vide',
+                  );
+                }
+                return;
+              }
+
+              if (!newUrl.startsWith('http://') &&
+                  !newUrl.startsWith('https://')) {
+                if (mounted) {
+                  ErrorSnackBar.show(
+                    context,
+                    'L\'URL doit commencer par http:// ou https://',
+                  );
+                }
+                return;
+              }
+
+              // Afficher un indicateur de chargement
+              if (!mounted) return;
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              );
+
+              try {
+                // Sauvegarder la nouvelle URL
+                await ApiConfig.setBaseUrl(newUrl);
+
+                // Mettre à jour ApiService
+                final apiService = ref.read(apiServiceProvider);
+                await apiService.updateBaseUrl(newUrl);
+
+                if (mounted) {
+                  Navigator.pop(context); // Fermer le dialog de chargement
+                  Navigator.pop(context); // Fermer le dialog de configuration
+                  _showSaveSnackBar('✅ URL du backend mise à jour');
+
+                  // Redémarrer l'app pour appliquer les changements
+                  Future.delayed(const Duration(seconds: 1), () {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'Redémarrez l\'application pour appliquer les changements'),
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    }
+                  });
+                }
+              } catch (e) {
+                if (mounted) {
+                  Navigator.pop(context); // Fermer le dialog de chargement
+                  ErrorSnackBar.show(
+                    context,
+                    '❌ Erreur lors de la mise à jour de l\'URL',
+                    suggestions: [
+                      e.toString(),
+                      'Vérifiez le format de l\'URL',
+                    ],
+                  );
+                }
+              }
+            },
+            child: const Text('Enregistrer'),
           ),
         ],
       ),

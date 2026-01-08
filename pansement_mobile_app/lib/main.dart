@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/home_screen.dart';
+import 'screens/comments_list_screen.dart';
+import 'screens/alerts_screen.dart';
 import 'config/api_config.dart';
 import 'services/notification_service.dart';
+import 'services/navigation_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,9 +31,16 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final navigationService = NavigationService();
+
     return MaterialApp(
+      navigatorKey: navigationService.navigatorKey,
       title: 'Pansement Connecté',
       debugShowCheckedModeBanner: false,
+      routes: {
+        '/comments': (context) => const CommentsListScreen(),
+        '/alerts': (context) => const AlertsScreen(),
+      },
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.blue,

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/dashboard_provider.dart';
 import '../widgets/patient_list_tile.dart';
 import 'patient_detail_screen.dart';
+import 'create_edit_patient_screen.dart';
 
 class PatientsListScreen extends ConsumerStatefulWidget {
   const PatientsListScreen({super.key});
@@ -191,13 +192,17 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 16),
                         child: ElevatedButton.icon(
-                          onPressed: () {
-                            // TODO: Navigation vers création patient
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Création de patient - À venir'),
+                          onPressed: () async {
+                            final result = await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const CreateEditPatientScreen(),
                               ),
                             );
+                            // Rafraîchir la liste si un patient a été créé
+                            if (result == true) {
+                              ref.invalidate(patientsProvider);
+                            }
                           },
                           icon: const Icon(Icons.person_add),
                           label: const Text('Nouveau patient'),

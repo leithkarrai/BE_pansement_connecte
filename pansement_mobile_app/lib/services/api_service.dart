@@ -264,6 +264,70 @@ class ApiService {
     }
   }
 
+  /// Crée un nouvel utilisateur (patient) - Admin uniquement
+  Future<User> createUser({
+    required String email,
+    required String password,
+    required String firstName,
+    required String lastName,
+    required String role,
+    String? phone,
+    String? bloodType,
+    DateTime? dateOfBirth,
+    String? address,
+  }) async {
+    try {
+      final data = <String, dynamic>{
+        'email': email,
+        'password': password,
+        'first_name': firstName,
+        'last_name': lastName,
+        'role': role,
+        if (phone != null) 'phone': phone,
+        if (bloodType != null) 'blood_type': bloodType,
+        if (dateOfBirth != null)
+          'date_of_birth': dateOfBirth.toIso8601String().split('T')[0],
+        if (address != null) 'address': address,
+      };
+
+      final response = await _dio.post(ApiConfig.users, data: data);
+      return User.fromJson(response.data);
+    } catch (e) {
+      _logger.e('Create user error: $e');
+      rethrow;
+    }
+  }
+
+  /// Met à jour un utilisateur
+  Future<User> updateUser({
+    required String userId,
+    String? email,
+    String? firstName,
+    String? lastName,
+    String? phone,
+    String? bloodType,
+    DateTime? dateOfBirth,
+    String? address,
+  }) async {
+    try {
+      final data = <String, dynamic>{};
+      if (email != null) data['email'] = email;
+      if (firstName != null) data['first_name'] = firstName;
+      if (lastName != null) data['last_name'] = lastName;
+      if (phone != null) data['phone'] = phone;
+      if (bloodType != null) data['blood_type'] = bloodType;
+      if (dateOfBirth != null)
+        data['date_of_birth'] = dateOfBirth.toIso8601String().split('T')[0];
+      if (address != null) data['address'] = address;
+
+      final response = await _dio.put('${ApiConfig.users}/$userId', data: data);
+      return User.fromJson(response.data);
+    } catch (e) {
+      _logger.e('Update user error: $e');
+      rethrow;
+    }
+  }
+
   // DEVICES
   Future<List<Device>> getDevices({String? status, String? patientId}) async {
     try {

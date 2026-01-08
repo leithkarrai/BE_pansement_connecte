@@ -5,6 +5,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
@@ -57,7 +58,8 @@ class ProfileScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: Theme.of(context).primaryColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(20),
@@ -175,7 +177,8 @@ class ProfileScreen extends ConsumerWidget {
                       context: context,
                       applicationName: 'Pansement Connecté',
                       applicationVersion: '1.0.0',
-                      applicationIcon: const Icon(Icons.medical_services, size: 48),
+                      applicationIcon:
+                          const Icon(Icons.medical_services, size: 48),
                       children: const [
                         Text(
                           'Application de monitoring des pansements connectés pour le suivi médical des patients.\n\n'
@@ -268,12 +271,22 @@ class ProfileScreen extends ConsumerWidget {
 
   String _formatDate(DateTime? date) {
     if (date == null) return 'N/A';
-    
+
     final months = [
-      'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-      'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
+      'janvier',
+      'février',
+      'mars',
+      'avril',
+      'mai',
+      'juin',
+      'juillet',
+      'août',
+      'septembre',
+      'octobre',
+      'novembre',
+      'décembre'
     ];
-    
+
     return '${date.day} ${months[date.month - 1]} ${date.year}';
   }
 
@@ -306,28 +319,46 @@ class ProfileScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 24),
               TextButton(
-                onPressed: () {
-                  // TODO: Ouvrir la politique de confidentialité
+                onPressed: () async {
                   Navigator.pop(context);
-                  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                    const SnackBar(
-                      content: Text('Politique de confidentialité - À venir'),
-                    ),
-                  );
+                  // URL de la politique de confidentialité (à remplacer par votre vraie URL)
+                  const url = 'https://example.com/privacy-policy';
+                  final uri = Uri.parse(url);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  } else {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'Impossible d\'ouvrir la politique de confidentialité'),
+                        ),
+                      );
+                    }
+                  }
                 },
                 child: const Text('Lire la politique de confidentialité'),
               ),
               TextButton(
-                onPressed: () {
-                  // TODO: Ouvrir les CGU
+                onPressed: () async {
                   Navigator.pop(context);
-                  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                    const SnackBar(
-                      content: Text('CGU - À venir'),
-                    ),
-                  );
+                  // URL des CGU (à remplacer par votre vraie URL)
+                  const url = 'https://example.com/terms-of-service';
+                  final uri = Uri.parse(url);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  } else {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Impossible d\'ouvrir les CGU'),
+                        ),
+                      );
+                    }
+                  }
                 },
-                child: const Text('Lire les conditions générales d\'utilisation'),
+                child:
+                    const Text('Lire les conditions générales d\'utilisation'),
               ),
             ],
           ),
@@ -389,7 +420,7 @@ class ProfileScreen extends ConsumerWidget {
             onPressed: () async {
               // Déconnexion
               await ref.read(authProvider.notifier).logout();
-              
+
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(builder: (_) => const LoginScreen()),
