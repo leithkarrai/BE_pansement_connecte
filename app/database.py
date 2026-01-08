@@ -2,9 +2,14 @@
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
+import os
 
 # URL de connexion PostgreSQL
-DATABASE_URL = "postgresql://postgres:postgres_password_change_me@localhost:5432/pansement_connecte"
+# Railway fournit automatiquement DATABASE_URL, sinon utiliser la valeur par défaut
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres_password_change_me@localhost:5432/pansement_connecte"
+)
 
 # Créer l'engine SQLAlchemy
 engine = create_engine(
