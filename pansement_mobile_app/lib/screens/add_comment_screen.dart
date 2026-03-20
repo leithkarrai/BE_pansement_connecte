@@ -49,6 +49,7 @@ class _AddCommentScreenState extends ConsumerState<AddCommentScreen> {
     }
 
     try {
+      // Création du commentaire via provider (backend = source d'autorité permissions).
       final success =
           await ref.read(commentsNotifierProvider.notifier).createComment(
                 patientId: widget.patient.id,
@@ -94,6 +95,7 @@ class _AddCommentScreenState extends ConsumerState<AddCommentScreen> {
   Widget build(BuildContext context) {
     final commentsState = ref.watch(commentsNotifierProvider);
 
+    // Formulaire guidé d'ajout de commentaire médical.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Nouveau commentaire'),

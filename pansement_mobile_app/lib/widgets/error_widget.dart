@@ -91,48 +91,65 @@ class ErrorSnackBar {
     Duration duration = const Duration(seconds: 4),
     List<String>? suggestions,
   }) {
-    if (!context.mounted) return;
+    // Utiliser addPostFrameCallback pour s'assurer que le widget est monté
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Vérifier que le contexte est toujours valide
+      if (!context.mounted) {
+        debugPrint("⚠️ Contexte désactivé, impossible d'afficher le SnackBar");
+        return;
+      }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      try {
+        final scaffoldMessenger = ScaffoldMessenger.maybeOf(context);
+        if (scaffoldMessenger == null) {
+          debugPrint("⚠️ ScaffoldMessenger non disponible");
+          return;
+        }
+
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.error_outline, color: Colors.white),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    message,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (suggestions != null && suggestions!.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              ...suggestions!.map((s) => Padding(
-                    padding: const EdgeInsets.only(left: 32, top: 4),
-                    child: Text(
-                      '• $s',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
+                Row(
+                  children: [
+                    const Icon(Icons.error_outline, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        message,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                  )),
-            ],
-          ],
-        ),
-        backgroundColor: Colors.red,
-        duration: duration,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+                  ],
+                ),
+                if (suggestions != null && suggestions.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  ...suggestions.map((s) => Padding(
+                        padding: const EdgeInsets.only(left: 32, top: 4),
+                        child: Text(
+                          '• $s',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                      )),
+                ],
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: duration,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } catch (e) {
+        debugPrint("❌ Erreur lors de l'affichage du SnackBar: $e");
+      }
+    });
   }
 }

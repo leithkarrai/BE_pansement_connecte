@@ -68,7 +68,7 @@ if (Test-Path $dbPath) {
         
         if ($LASTEXITCODE -eq 0) {
             Write-Host "   ✅ Services de base de données démarrés" -ForegroundColor Green
-            Write-Host "   ⏳ Attente du démarrage complet (10 secondes)..." -ForegroundColor Gray
+            Write-Host "   Attente du demarrage complet (10 secondes)..." -ForegroundColor Gray
             Start-Sleep -Seconds 10
         } else {
             Write-Host "   ⚠️  Erreur lors du démarrage des services" -ForegroundColor Yellow
@@ -118,12 +118,12 @@ if ($LASTEXITCODE -ne 0) {
 
 # Attendre que le backend soit prêt
 Write-Host ""
-Write-Host "   ⏳ Attente du démarrage complet (5 secondes)..." -ForegroundColor Gray
+Write-Host "   Attente du demarrage complet (5 secondes)..." -ForegroundColor Gray
 Start-Sleep -Seconds 5
 
 # Vérifier que le backend répond
 Write-Host ""
-Write-Host "   🔍 Vérification de la santé du backend..." -ForegroundColor Cyan
+Write-Host "   Verification de la sante du backend..." -ForegroundColor Cyan
 $maxAttempts = 12
 $attempt = 0
 $backendReady = $false

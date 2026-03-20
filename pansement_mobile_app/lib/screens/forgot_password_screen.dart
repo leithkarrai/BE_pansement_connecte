@@ -28,7 +28,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     });
 
     try {
-      // TODO: Implémenter l'appel API forgot-password
+      // TODO backend: brancher POST /auth/forgot-password.
+      // En attendant, simulation UX pour valider le parcours écran.
       await Future.delayed(const Duration(seconds: 1));
 
       if (mounted) {
@@ -54,6 +55,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Ecran à deux états:
+    // 1) formulaire email, 2) confirmation "email envoyé".
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mot de passe oublié'),

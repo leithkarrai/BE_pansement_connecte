@@ -1,0 +1,37 @@
+# PostgreSQL + Redis uniquement pour lancer le backend en local (python -m uvicorn).
+# Usage (avec Docker Desktop démarré) :
+#   docker compose -f docker-compose.db-only.yml up -d
+# Puis : python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+services:
+  pansement_postgres:
+    image: postgres:15-alpine
+    container_name: pansement_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password_change_me
+      POSTGRES_DB: pansement_connecte
+    ports:
+      - "5432:5432"
+    volumes:
+      - pansement_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pansement_redis:
+    image: redis:7-alpine
+    container_name: pansement_redis
+    command: redis-server --requirepass redis_password_change_me
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_password_change_me", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pansement_pgdata:

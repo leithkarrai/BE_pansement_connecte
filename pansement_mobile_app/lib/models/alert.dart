@@ -14,6 +14,10 @@ class Alert {
   final DateTime triggeredAt;
   final DateTime? acknowledgedAt;
   final String? acknowledgedBy;
+  /// Vu par un médecin (acquittement séparé du rôle admin).
+  final DateTime? acknowledgedByMedecinAt;
+  /// Vu par l'admin (acquittement séparé du rôle médecin).
+  final DateTime? acknowledgedByAdminAt;
   final DateTime? resolvedAt;
   final String? resolvedBy;
   final String? resolutionNote;
@@ -35,6 +39,8 @@ class Alert {
     required this.triggeredAt,
     this.acknowledgedAt,
     this.acknowledgedBy,
+    this.acknowledgedByMedecinAt,
+    this.acknowledgedByAdminAt,
     this.resolvedAt,
     this.resolvedBy,
     this.resolutionNote,
@@ -47,23 +53,28 @@ class Alert {
   static String _cleanString(dynamic value) {
     if (value == null) return '';
     String str = value.toString();
-    // Si la chaîne contient des caractères mal encodés, essayer de les corriger
     try {
-      // Essayer de décoder en UTF-8 si c'est une liste de bytes
-      if (str.contains('??')) {
-        // Les caractères mal encodés apparaissent souvent comme '??'
-        // On ne peut pas les récupérer, mais on peut au moins s'assurer que le reste est correct
-        return str;
-      }
+      if (str.contains('??')) return str;
       return str;
     } catch (e) {
       return str;
     }
   }
 
+  /// Parse une date depuis le JSON (chaîne ISO ou null).
+  static DateTime? _parseDate(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    final s = value.toString().trim();
+    if (s.isEmpty) return null;
+    return DateTime.tryParse(s);
+  }
+
   factory Alert.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id']?.toString().trim() ?? '';
+    final id = (rawId.isEmpty || rawId == 'null') ? '' : rawId;
     return Alert(
-      id: json['id'].toString(),
+      id: id,
       patientId: json['patient_id'].toString(),
       deviceId: json['device_id'].toString(),
       measurementId: json['measurement_id']?.toString(),
@@ -77,24 +88,35 @@ class Alert {
       thresholdValue: json['threshold_value'] != null
           ? double.tryParse(json['threshold_value'].toString())
           : null,
-      triggeredAt: DateTime.parse(json['triggered_at']),
-      acknowledgedAt: json['acknowledged_at'] != null
-          ? DateTime.tryParse(json['acknowledged_at'].toString())
-          : null,
+      triggeredAt: DateTime.tryParse(json['triggered_at'].toString()) ?? DateTime.now(),
+      acknowledgedAt: _parseDate(json['acknowledged_at']),
       acknowledgedBy: json['acknowledged_by']?.toString(),
-      resolvedAt: json['resolved_at'] != null
-          ? DateTime.tryParse(json['resolved_at'].toString())
-          : null,
+      acknowledgedByMedecinAt: _parseDate(json['acknowledged_by_medecin_at']),
+      acknowledgedByAdminAt: _parseDate(json['acknowledged_by_admin_at']),
+      resolvedAt: _parseDate(json['resolved_at']),
       resolvedBy: json['resolved_by']?.toString(),
       resolutionNote: json['resolution_note']?.toString(),
       notificationSent: json['notification_sent'] ?? false,
       notificationMethod: json['notification_method']?.toString(),
-      notificationSentAt: json['notification_sent_at'] != null
-          ? DateTime.tryParse(json['notification_sent_at'].toString())
-          : null,
+      notificationSentAt: _parseDate(json['notification_sent_at']),
     );
   }
 
+  /// Considère l'alerte comme acquittée pour le rôle donné.
+  /// Chaque rôle a son propre acquittement : médecin voit barré seulement s'il a acquitté, idem pour l'admin.
+  bool isAcknowledgedForRole(String? role) {
+    if (role == null) return acknowledgedAt != null;
+    switch (role.toLowerCase()) {
+      case 'medecin':
+        return acknowledgedByMedecinAt != null;
+      case 'admin':
+        return acknowledgedByAdminAt != null;
+      default:
+        return acknowledgedAt != null;
+    }
+  }
+
+  /// Pour compatibilité : vrai si au moins un acquittement (patient = acknowledgedAt).
   bool get isAcknowledged => acknowledgedAt != null;
   bool get isResolved => resolvedAt != null;
   bool get isCritical => severity == 'critical';

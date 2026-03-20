@@ -29,6 +29,7 @@ class _SecurityScreenState extends ConsumerState<SecurityScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     try {
+      // Changement mot de passe côté backend (session courante).
       final apiService = ApiService();
       await apiService.changePassword(
         oldPassword: _oldPasswordController.text,
@@ -61,6 +62,8 @@ class _SecurityScreenState extends ConsumerState<SecurityScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Ecran sécurité:
+    // actions disponibles (mot de passe) + placeholders roadmap (2FA, confidentialité).
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sécurité et confidentialité'),

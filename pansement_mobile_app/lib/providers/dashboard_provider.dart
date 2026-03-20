@@ -5,7 +5,7 @@ import '../models/device.dart';
 import 'auth_provider.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-// Helper pour charger le token dans ApiService
+/// Charge le token JWT pour les appels dashboard effectués hors flux login direct.
 Future<void> _ensureTokenLoaded(ApiService apiService) async {
   const storage = FlutterSecureStorage();
   final token = await storage.read(key: 'access_token');
@@ -14,35 +14,63 @@ Future<void> _ensureTokenLoaded(ApiService apiService) async {
   }
 }
 
-// Provider pour les patients (filtré selon le rôle)
-final patientsProvider = FutureProvider<List<User>>((ref) async {
-  final apiService = ref.watch(apiServiceProvider);
-  await _ensureTokenLoaded(apiService);
-  final currentUser = ref.watch(authProvider).user;
+/// Liste utilisateurs pour le dashboard.
+/// - admin: patients + médecins
+/// - médecin: lui-même + ses patients
+/// - patient: lui-même
+final usersProvider = FutureProvider<List<User>>((ref) async {
+  try {
+    final apiService = ref.watch(apiServiceProvider);
+    await _ensureTokenLoaded(apiService);
+    final currentUser = ref.watch(authProvider).user;
 
-  if (currentUser == null) return [];
+    if (currentUser == null) return [];
 
-  // ADMIN : Voir tous les utilisateurs (patients + médecins)
-  if (currentUser.role == 'admin') {
-    final patients = await apiService.getUsers(role: 'patient');
-    final doctors = await apiService.getUsers(role: 'medecin');
-    return [...patients, ...doctors];
+    if (currentUser.role == 'admin') {
+      final patients = await apiService.getUsers(role: 'patient');
+      final doctors = await apiService.getUsers(role: 'medecin');
+      return [...patients, ...doctors];
+    }
+    if (currentUser.role == 'medecin') {
+      final patients = await apiService.getUsers(role: 'patient');
+      return [currentUser, ...patients];
+    }
+    if (currentUser.role == 'patient') {
+      return [currentUser];
+    }
+    return [];
+  } catch (_) {
+    return [];
   }
-
-  // MÉDECIN : Voir tous les patients
-  if (currentUser.role == 'medecin') {
-    return await apiService.getUsers(role: 'patient');
-  }
-
-  // PATIENT : Ne voir que lui-même
-  if (currentUser.role == 'patient') {
-    return [currentUser];
-  }
-
-  return [];
 });
 
-// Provider pour les patients uniquement (pour l'assignation de devices)
+/// Liste "patients" adaptée au rôle courant.
+final patientsProvider = FutureProvider<List<User>>((ref) async {
+  try {
+    final apiService = ref.watch(apiServiceProvider);
+    await _ensureTokenLoaded(apiService);
+    final currentUser = ref.watch(authProvider).user;
+
+    if (currentUser == null) return [];
+
+    if (currentUser.role == 'admin') {
+      final patients = await apiService.getUsers(role: 'patient');
+      final doctors = await apiService.getUsers(role: 'medecin');
+      return [...patients, ...doctors];
+    }
+    if (currentUser.role == 'medecin') {
+      return await apiService.getUsers(role: 'patient');
+    }
+    if (currentUser.role == 'patient') {
+      return [currentUser];
+    }
+    return [];
+  } catch (_) {
+    return [];
+  }
+});
+
+/// Liste stricte des patients (utile pour assignation de devices).
 final patientsOnlyProvider = FutureProvider<List<User>>((ref) async {
   final apiService = ref.watch(apiServiceProvider);
   await _ensureTokenLoaded(apiService);
@@ -51,113 +79,144 @@ final patientsOnlyProvider = FutureProvider<List<User>>((ref) async {
   return await apiService.getUsers(role: 'patient');
 });
 
-// Provider pour les devices (filtré selon le rôle)
+/// Liste devices filtrée par rôle.
 final devicesProvider = FutureProvider<List<Device>>((ref) async {
-  final apiService = ref.watch(apiServiceProvider);
-  await _ensureTokenLoaded(apiService);
-  final currentUser = ref.watch(authProvider).user;
+  try {
+    final apiService = ref.watch(apiServiceProvider);
+    await _ensureTokenLoaded(apiService);
+    final currentUser = ref.watch(authProvider).user;
 
-  if (currentUser == null) return [];
+    if (currentUser == null) return [];
 
-  // ADMIN : Tous les devices
-  if (currentUser.role == 'admin') {
-    return await apiService.getDevices();
+    if (currentUser.role == 'admin') {
+      return await apiService.getDevices();
+    }
+    if (currentUser.role == 'medecin') {
+      return await apiService.getDevices();
+    }
+    if (currentUser.role == 'patient') {
+      return await apiService.getDevices(patientId: currentUser.id);
+    }
+    return [];
+  } catch (_) {
+    return [];
   }
-
-  // MÉDECIN : Devices de ses patients uniquement
-  if (currentUser.role == 'medecin') {
-    // TODO: Filtrer par patients du médecin
-    // Pour l'instant, on retourne tous
-    return await apiService.getDevices();
-  }
-
-  // PATIENT : Son device uniquement
-  if (currentUser.role == 'patient') {
-    return await apiService.getDevices(patientId: currentUser.id);
-  }
-
-  return [];
 });
 
-// Provider pour les statistiques (filtré selon le rôle)
-final dashboardStatsProvider = FutureProvider<Map<String, int>>((ref) async {
-  final apiService = ref.watch(apiServiceProvider);
-  await _ensureTokenLoaded(apiService);
-  final currentUser = ref.watch(authProvider).user;
-
-  if (currentUser == null) {
-    return {
+/// Valeurs par défaut en cas d'erreur API (fallback robuste UI).
+Map<String, int> _defaultStats() => {
       'total_patients': 0,
       'active_patients': 0,
       'total_devices': 0,
       'active_devices': 0,
       'available_devices': 0,
+      'total_doctors': 0,
+      'alerts': 0,
+      'alerts_unacknowledged': 0,
+      'today_measurements': 0,
+      'my_patients': 0,
+      'my_device': 0,
+      'device_status': 0,
+      'battery_level': 0,
     };
+
+/// Statistiques du dashboard selon le rôle courant.
+/// Les champs absents selon rôle sont volontairement omis côté retour.
+final dashboardStatsProvider = FutureProvider<Map<String, int>>((ref) async {
+  try {
+    final apiService = ref.watch(apiServiceProvider);
+    await _ensureTokenLoaded(apiService);
+    final currentUser = ref.watch(authProvider).user;
+
+    if (currentUser == null) return _defaultStats();
+
+    if (currentUser.role == 'admin') {
+      final patients = await apiService.getUsers(role: 'patient');
+      final doctors = await apiService.getUsers(role: 'medecin');
+      final devices = await apiService.getDevices();
+      int alertsTotal = 0;
+      int alertsUnacknowledged = 0;
+      try {
+        final alertsData = await apiService.getAlerts(limit: 100);
+        alertsTotal = (alertsData['total'] as int?) ?? 0;
+        alertsUnacknowledged = (alertsData['unacknowledged'] as int?) ?? 0;
+      } catch (_) {}
+
+      int todayMeasurements = 0;
+      try {
+        todayMeasurements = await apiService.getTodayMeasurementsCount();
+      } catch (_) {}
+
+      // Côté admin, "utilisateurs" = patients + médecins.
+      // (les KPI "Total Utilisateurs" / "Utilisateurs Actifs" doivent donc
+      // inclure aussi les médecins).
+      final activePatients = patients.where((p) => p.isActive).length;
+      final activeDoctors = doctors.where((d) => d.isActive).length;
+      final activeDevices = devices.where((d) => d.status == 'active').length;
+      final availableDevices = devices.where((d) => d.patientId == null).length;
+
+      return {
+        // Garder les clés existantes pour ne pas impacter les écrans.
+        'total_patients': patients.length + doctors.length,
+        'active_patients': activePatients + activeDoctors,
+        'total_doctors': doctors.length,
+        'active_devices': activeDevices,
+        'available_devices': availableDevices,
+        'alerts': alertsTotal,
+        'alerts_unacknowledged': alertsUnacknowledged,
+        'today_measurements': todayMeasurements,
+      };
+    }
+
+    if (currentUser.role == 'medecin') {
+      final patients = await apiService.getUsers(role: 'patient');
+      final devices = await apiService.getDevices();
+      int alertsTotal = 0;
+      int alertsUnacknowledged = 0;
+      try {
+        final alertsData = await apiService.getAlerts(limit: 100);
+        alertsTotal = (alertsData['total'] as int?) ?? 0;
+        alertsUnacknowledged = (alertsData['unacknowledged'] as int?) ?? 0;
+      } catch (_) {}
+
+      int todayMeasurements = 0;
+      try {
+        todayMeasurements = await apiService.getTodayMeasurementsCount();
+      } catch (_) {}
+
+      final activePatients = patients.where((p) => p.isActive).length;
+      final activeDevices = devices.where((d) => d.status == 'active').length;
+
+      return {
+        'total_patients': patients.length,
+        'active_patients': activePatients,
+        'my_patients': patients.length,
+        'active_devices': activeDevices,
+        'alerts': alertsTotal,
+        'alerts_unacknowledged': alertsUnacknowledged,
+        'today_measurements': todayMeasurements,
+      };
+    }
+
+    if (currentUser.role == 'patient') {
+      final devices = await apiService.getDevices(patientId: currentUser.id);
+      final myDevice = devices.isNotEmpty ? devices.first : null;
+
+      return {
+        'my_device': myDevice != null ? 1 : 0,
+        'device_status': myDevice?.status == 'active' ? 1 : 0,
+        'battery_level': myDevice?.batteryLevel ?? 0,
+        'total_measurements': 0,
+      };
+    }
+
+    return _defaultStats();
+  } catch (_) {
+    return _defaultStats();
   }
-
-  // ADMIN : Statistiques globales
-  if (currentUser.role == 'admin') {
-    final patients = await apiService.getUsers(role: 'patient');
-    final doctors = await apiService.getUsers(role: 'medecin');
-    final devices = await apiService.getDevices();
-
-    // Calculer les patients actifs
-    final activePatients = patients.where((p) => p.isActive).length;
-
-    // Calculer les devices actifs
-    final activeDevices = devices.where((d) => d.status == 'active').length;
-
-    // Calculer les devices disponibles (non assignés)
-    final availableDevices = devices.where((d) => d.patientId == null).length;
-
-    return {
-      'total_patients': patients.length,
-      'active_patients': activePatients,
-      'total_doctors': doctors.length,
-      'active_devices': activeDevices,
-      'available_devices': availableDevices,
-      'today_measurements': 0, // TODO: Compter les mesures d'aujourd'hui
-    };
-  }
-
-  // MÉDECIN : Statistiques de ses patients
-  if (currentUser.role == 'medecin') {
-    final patients = await apiService.getUsers(role: 'patient');
-    // TODO: Filtrer par patients du médecin
-    final devices = await apiService.getDevices();
-
-    // Calculer les patients actifs
-    final activePatients = patients.where((p) => p.isActive).length;
-
-    // Calculer les devices actifs
-    final activeDevices = devices.where((d) => d.status == 'active').length;
-
-    return {
-      'total_patients': patients.length,
-      'active_patients': activePatients,
-      'my_patients': patients.length, // Nombre de patients assignés
-      'active_devices': activeDevices,
-      'alerts': 0, // TODO: Compter les alertes (mesures anormales)
-    };
-  }
-
-  // PATIENT : Statistiques personnelles
-  if (currentUser.role == 'patient') {
-    final devices = await apiService.getDevices(patientId: currentUser.id);
-    final myDevice = devices.isNotEmpty ? devices.first : null;
-
-    return {
-      'my_device': myDevice != null ? 1 : 0,
-      'device_status': myDevice?.status == 'active' ? 1 : 0,
-      'battery_level': myDevice?.batteryLevel ?? 0,
-      'total_measurements': 0, // TODO: Compter les mesures
-    };
-  }
-
-  return {};
 });
 
-// Provider pour récupérer les détails d'un patient spécifique
+/// Détail d'un patient pour les écrans fiche patient.
 final patientDetailProvider =
     FutureProvider.family<User, String>((ref, patientId) async {
   final apiService = ref.watch(apiServiceProvider);
@@ -165,7 +224,7 @@ final patientDetailProvider =
   return await apiService.getUser(patientId);
 });
 
-// Provider pour récupérer le device d'un patient (un seul - pour compatibilité)
+/// Device principal d'un patient (compat avec écrans historiques à device unique).
 final patientDeviceProvider =
     FutureProvider.family<Device?, String>((ref, patientId) async {
   final apiService = ref.watch(apiServiceProvider);
@@ -179,7 +238,7 @@ final patientDeviceProvider =
   }
 });
 
-// Provider pour récupérer TOUS les devices d'un patient (plusieurs devices possibles)
+/// Tous les devices d'un patient (cas multi-devices).
 final patientDevicesProvider =
     FutureProvider.family<List<Device>, String>((ref, patientId) async {
   final apiService = ref.watch(apiServiceProvider);
@@ -188,6 +247,33 @@ final patientDevicesProvider =
   try {
     final devices = await apiService.getDevices(patientId: patientId);
     return devices;
+  } catch (e) {
+    return [];
+  }
+});
+
+/// Médecin assigné à un patient (si disponible).
+final patientMedecinProvider =
+    FutureProvider.family<Map<String, dynamic>?, String>(
+        (ref, patientId) async {
+  final apiService = ref.watch(apiServiceProvider);
+  await _ensureTokenLoaded(apiService);
+
+  try {
+    return await apiService.getPatientMedecin(patientId);
+  } catch (e) {
+    return null;
+  }
+});
+
+/// Patients suivis par un médecin donné.
+final medecinPatientsProvider =
+    FutureProvider.family<List<User>, String>((ref, medecinId) async {
+  final apiService = ref.watch(apiServiceProvider);
+  await _ensureTokenLoaded(apiService);
+
+  try {
+    return await apiService.getMedecinPatients(medecinId);
   } catch (e) {
     return [];
   }

@@ -7,6 +7,17 @@ from typing import Optional, Any
 import os
 from datetime import timedelta
 
+
+def _safe_print(msg: str) -> None:
+    """Message ASCII pour eviter UnicodeEncodeError (Windows cp1252)."""
+    safe = (msg or "").encode("ascii", "replace").decode("ascii")
+    try:
+        print(safe)
+    except Exception:
+        import sys
+        sys.stderr.buffer.write(safe.encode("ascii") + b"\n")
+        sys.stderr.buffer.flush()
+
 # Configuration Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
@@ -37,7 +48,7 @@ def get_redis_client() -> redis.Redis:
             # Tester la connexion
             _redis_client.ping()
         except Exception as e:
-            print(f"⚠️ Erreur connexion Redis: {e}")
+            _safe_print(f"[WARN] Erreur connexion Redis: {e}")
             _redis_client = None
     return _redis_client
 
@@ -69,7 +80,7 @@ def cache_set(key: str, value: Any, expire: int = 3600) -> bool:
         
         return client.setex(key, expire, json_value)
     except Exception as e:
-        print(f"⚠️ Erreur Redis SET '{key}': {e}")
+        _safe_print(f"[WARN] Erreur Redis SET '{key}': {e}")
         return False
 
 
@@ -98,7 +109,7 @@ def cache_get(key: str) -> Optional[Any]:
         except (json.JSONDecodeError, TypeError):
             return value
     except Exception as e:
-        print(f"⚠️ Erreur Redis GET '{key}': {e}")
+        _safe_print(f"[WARN] Erreur Redis GET '{key}': {e}")
         return None
 
 
@@ -128,7 +139,7 @@ def cache_delete(key: str) -> bool:
         else:
             return bool(client.delete(key))
     except Exception as e:
-        print(f"⚠️ Erreur Redis DELETE '{key}': {e}")
+        _safe_print(f"[WARN] Erreur Redis DELETE '{key}': {e}")
         return False
 
 
@@ -153,7 +164,7 @@ def cache_increment(key: str, amount: int = 1, expire: int = 3600) -> int:
         client.expire(key, expire)
         return value
     except Exception as e:
-        print(f"⚠️ Erreur Redis INCR '{key}': {e}")
+        _safe_print(f"[WARN] Erreur Redis INCR '{key}': {e}")
         return 0
 
 
@@ -170,6 +181,6 @@ def test_redis_connection() -> bool:
             return False
         return client.ping()
     except Exception as e:
-        print(f"⚠️ Erreur connexion Redis: {e}")
+        _safe_print(f"[WARN] Erreur connexion Redis: {e}")
         return False
 

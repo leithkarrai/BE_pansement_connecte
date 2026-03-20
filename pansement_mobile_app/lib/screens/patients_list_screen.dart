@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/auth_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../widgets/patient_list_tile.dart';
 import 'patient_detail_screen.dart';
@@ -19,7 +20,11 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
   @override
   Widget build(BuildContext context) {
     final patientsAsync = ref.watch(patientsProvider);
+    final currentUser = ref.watch(authProvider).user;
+    final canAddPatient = currentUser?.role == 'admin';
 
+    // Vue liste utilisateurs orientée "patients":
+    // recherche + filtre statut + refresh provider.
     return Column(
       children: [
         // Header avec titre et bouton filtre
@@ -124,7 +129,7 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
         Expanded(
           child: patientsAsync.when(
             data: (patients) {
-              // Filtrer les patients
+              // Filtrage combiné local: texte + statut actif/inactif.
               var filteredPatients = patients.where((patient) {
                 final matchesSearch = _searchQuery.isEmpty ||
                     patient.fullName.toLowerCase().contains(_searchQuery) ||
@@ -182,13 +187,12 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
                     left: 16,
                     right: 16,
                     top: 8,
-                    bottom: 80, // Espace pour la Bottom Navigation Bar + bouton
+                    bottom: 80,
                   ),
-                  itemCount: filteredPatients.length +
-                      1, // +1 pour le bouton "Nouveau patient"
+                  itemCount: filteredPatients.length + (canAddPatient ? 1 : 0),
                   itemBuilder: (context, index) {
-                    // Afficher le bouton "Nouveau patient" à la fin
-                    if (index == filteredPatients.length) {
+                    // Action de création réservée à l'admin.
+                    if (canAddPatient && index == filteredPatients.length) {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 16),
                         child: ElevatedButton.icon(
@@ -199,7 +203,6 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
                                 builder: (_) => const CreateEditPatientScreen(),
                               ),
                             );
-                            // Rafraîchir la liste si un patient a été créé
                             if (result == true) {
                               ref.invalidate(patientsProvider);
                             }

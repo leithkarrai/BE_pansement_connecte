@@ -8,7 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/auth_provider.dart';
 import '../providers/notifications_provider.dart';
-import '../config/api_config.dart';
+import '../providers/theme_provider.dart';
 import '../widgets/error_widget.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -21,8 +21,11 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _emailNotifications = true;
   bool _pushNotifications = true;
-  bool _darkMode = false;
-  String _language = 'Français';
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -33,6 +36,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
 
+    // Préférences locales UI (le backend reste source d'autorité métier).
     setState(() {
       _emailNotifications =
           prefs.getBool('notifications_email_enabled') ?? true;
@@ -49,12 +53,44 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final user = ref.watch(authProvider).user;
 
+    // Ecran de réglages utilisateur:
+    // apparence, notifications, compte, actions données.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Paramètres'),
       ),
       body: ListView(
         children: [
+          // Section Apparence (mode sombre)
+          _buildSectionHeader('Apparence'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Column(
+              children: [
+                Consumer(
+                  builder: (context, ref, _) {
+                    final themeNotifier = ref.watch(themeModeProvider.notifier);
+                    final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
+                    return SwitchListTile(
+                      secondary: Icon(
+                        isDark ? Icons.dark_mode : Icons.light_mode,
+                        color: Theme.of(context).iconTheme.color,
+                      ),
+                      title: const Text('Mode sombre'),
+                      subtitle: const Text('Activer le thème sombre'),
+                      value: isDark,
+                      onChanged: (value) async {
+                        await themeNotifier.setDark(value);
+                        if (!mounted) return;
+                        _showSaveSnackBar('Thème mis à jour');
+                      },
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+
           // Section Notifications
           _buildSectionHeader('Notifications'),
           Card(
@@ -91,7 +127,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     await _saveNotificationPreference(
                         'notifications_push_enabled', value);
 
-                    // Démarrer/arrêter le polling selon la préférence
+                    // Active/désactive la boucle de polling locale en cohérence.
                     if (value) {
                       ref
                           .read(notificationPollingProvider.notifier)
@@ -105,69 +141,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     if (!mounted) return;
                     _showSaveSnackBar('Paramètre enregistré');
                   },
-                ),
-              ],
-            ),
-          ),
-
-          // Section Apparence
-          _buildSectionHeader('Apparence'),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Column(
-              children: [
-                SwitchListTile(
-                  secondary: const Icon(Icons.dark_mode),
-                  title: const Text('Mode sombre'),
-                  subtitle: const Text('Activer le thème sombre'),
-                  value: _darkMode,
-                  onChanged: (value) {
-                    setState(() {
-                      _darkMode = value;
-                    });
-                    _showSaveSnackBar(
-                        'Mode ${value ? "sombre" : "clair"} activé');
-                  },
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.language),
-                  title: const Text('Langue'),
-                  subtitle: Text(_language),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _showLanguageDialog(),
-                ),
-              ],
-            ),
-          ),
-
-          // Section Configuration
-          _buildSectionHeader('Configuration'),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.settings_ethernet),
-                  title: const Text('URL du Backend'),
-                  subtitle: FutureBuilder<String>(
-                    future: ApiConfig.getBaseUrl(),
-                    builder: (context, snapshot) {
-                      if (snapshot.hasData) {
-                        return Text(
-                          snapshot.data!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        );
-                      }
-                      return const Text('Chargement...');
-                    },
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _showBackendUrlDialog(),
                 ),
               ],
             ),
@@ -207,32 +180,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
 
-          // Section Données
-          _buildSectionHeader('Données'),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.download),
-                  title: const Text('Télécharger mes données'),
-                  subtitle: const Text('Export de toutes vos données'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _showExportDataDialog(),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.delete_forever, color: Colors.red),
-                  title: const Text('Supprimer mon compte',
-                      style: TextStyle(color: Colors.red)),
-                  subtitle: const Text('Action irréversible'),
-                  trailing: const Icon(Icons.chevron_right, color: Colors.red),
-                  onTap: () => _showDeleteAccountDialog(),
-                ),
-              ],
-            ),
-          ),
-
           const SizedBox(height: 32),
         ],
       ),
@@ -261,42 +208,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         content: Text(message),
         duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  void _showLanguageDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Choisir la langue'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            RadioListTile<String>(
-              title: const Text('Français'),
-              value: 'Français',
-              groupValue: _language,
-              onChanged: (value) {
-                if (!mounted) return;
-                setState(() => _language = value!);
-                Navigator.pop(context);
-                _showSaveSnackBar('Langue changée: $_language');
-              },
-            ),
-            RadioListTile<String>(
-              title: const Text('English'),
-              value: 'English',
-              groupValue: _language,
-              onChanged: (value) {
-                if (!mounted) return;
-                setState(() => _language = value!);
-                Navigator.pop(context);
-                _showSaveSnackBar('Language changed: $_language');
-              },
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -565,248 +476,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showExportDataDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Télécharger mes données'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Vous allez recevoir un fichier contenant :'),
-            SizedBox(height: 8),
-            Text('• Vos informations personnelles'),
-            Text('• Vos mesures'),
-            Text('• Les commentaires des médecins'),
-            SizedBox(height: 16),
-            Text(
-              'Le fichier sera envoyé par email dans les prochaines minutes.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              // TODO: Appeler l'API pour exporter les données
-              Navigator.pop(context);
-              if (mounted) {
-                _showSaveSnackBar('Export en cours... Vous recevrez un email');
-              }
-            },
-            child: const Text('Confirmer'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showBackendUrlDialog() async {
-    final urlController = TextEditingController();
-    final currentUrl = await ApiConfig.getBaseUrl();
-    urlController.text = currentUrl;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Configuration du Backend'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Modifiez l\'URL du backend si nécessaire.',
-                style: TextStyle(fontSize: 14),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: urlController,
-                decoration: const InputDecoration(
-                  labelText: 'URL du Backend',
-                  hintText: 'http://192.168.1.XXX:8000/api/v1',
-                  prefixIcon: Icon(Icons.link),
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.url,
-              ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: () async {
-                  await ApiConfig.resetBaseUrl();
-                  urlController.text = await ApiConfig.getBaseUrl();
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content:
-                            Text('URL réinitialisée à la valeur par défaut'),
-                      ),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Réinitialiser à la valeur par défaut'),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final newUrl = urlController.text.trim();
-
-              // Validation
-              if (newUrl.isEmpty) {
-                if (mounted) {
-                  ErrorSnackBar.show(
-                    context,
-                    'L\'URL ne peut pas être vide',
-                  );
-                }
-                return;
-              }
-
-              if (!newUrl.startsWith('http://') &&
-                  !newUrl.startsWith('https://')) {
-                if (mounted) {
-                  ErrorSnackBar.show(
-                    context,
-                    'L\'URL doit commencer par http:// ou https://',
-                  );
-                }
-                return;
-              }
-
-              // Afficher un indicateur de chargement
-              if (!mounted) return;
-              showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (context) => const Center(
-                  child: CircularProgressIndicator(),
-                ),
-              );
-
-              try {
-                // Sauvegarder la nouvelle URL
-                await ApiConfig.setBaseUrl(newUrl);
-
-                // Mettre à jour ApiService
-                final apiService = ref.read(apiServiceProvider);
-                await apiService.updateBaseUrl(newUrl);
-
-                if (mounted) {
-                  Navigator.pop(context); // Fermer le dialog de chargement
-                  Navigator.pop(context); // Fermer le dialog de configuration
-                  _showSaveSnackBar('✅ URL du backend mise à jour');
-
-                  // Redémarrer l'app pour appliquer les changements
-                  Future.delayed(const Duration(seconds: 1), () {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                              'Redémarrez l\'application pour appliquer les changements'),
-                          duration: Duration(seconds: 3),
-                        ),
-                      );
-                    }
-                  });
-                }
-              } catch (e) {
-                if (mounted) {
-                  Navigator.pop(context); // Fermer le dialog de chargement
-                  ErrorSnackBar.show(
-                    context,
-                    '❌ Erreur lors de la mise à jour de l\'URL',
-                    suggestions: [
-                      e.toString(),
-                      'Vérifiez le format de l\'URL',
-                    ],
-                  );
-                }
-              }
-            },
-            child: const Text('Enregistrer'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showDeleteAccountDialog() {
-    final passwordController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Supprimer mon compte',
-            style: TextStyle(color: Colors.red)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '⚠️ ATTENTION : Cette action est irréversible !',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
-            ),
-            const SizedBox(height: 16),
-            const Text('Toutes vos données seront définitivement supprimées :'),
-            const SizedBox(height: 8),
-            const Text('• Profil'),
-            const Text('• Mesures'),
-            const Text('• Commentaires'),
-            const Text('• Appareils'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: passwordController,
-              decoration: const InputDecoration(
-                labelText: 'Confirmez avec votre mot de passe',
-                prefixIcon: Icon(Icons.lock),
-              ),
-              obscureText: true,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (passwordController.text.isNotEmpty) {
-                // TODO: Appeler l'API pour supprimer le compte
-                Navigator.pop(context);
-                if (mounted) {
-                  _showSaveSnackBar('Compte supprimé');
-                  // Déconnecter et rediriger vers login
-                }
-              } else {
-                if (mounted) {
-                  _showSaveSnackBar('Veuillez entrer votre mot de passe');
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
-            child: const Text('Supprimer définitivement'),
           ),
         ],
       ),

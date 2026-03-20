@@ -1,8 +1,10 @@
-﻿from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import jwt
 from passlib.context import CryptContext
 from app.config import settings
 
+# Contexte passlib centralisé pour tout le backend.
+# Schéma actuel: bcrypt (compatible avec les hashs existants en base).
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def validate_password_strength(password: str) -> tuple[bool, str]:
@@ -82,8 +84,16 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(password_to_verify, hashed_password)
 
 def create_access_token(data: dict) -> str:
+    """
+    Crée un access token JWT court (durée configurable via settings).
+
+    Convention de payload utilisée dans le projet:
+    - `sub`: id utilisateur (str UUID)
+    - `role`: rôle courant (patient/medecin/admin)
+    """
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
@@ -92,8 +102,8 @@ def create_refresh_token(data: dict) -> str:
     Créer un refresh token (durée de vie: 7 jours).
     """
     to_encode = data.copy()
-    # Refresh token expire après 7 jours
-    expire = datetime.utcnow() + timedelta(days=7)
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(days=7)
     to_encode.update({"exp": expire, "type": "refresh"})
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
@@ -102,7 +112,11 @@ def decode_token(token: str):
     Décoder un token JWT.
     
     Returns:
-        dict: Le payload du token si valide, None sinon
+        dict: Le payload du token si valide, None sinon.
+
+    Note de sécurité:
+    - cette fonction ne lève pas d'exception vers l'appelant,
+      elle renvoie None pour tous les cas invalides (expiré, signature invalide, format invalide).
     """
     try:
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/alerts_provider.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/patient_list_tile.dart';
 import 'login_screen.dart';
@@ -12,16 +14,88 @@ import 'alerts_screen.dart';
 import 'settings_screen.dart';
 
 /// Dashboard Administrateur - Vue complète du système
-class AdminDashboardScreen extends ConsumerWidget {
+/// Actualisation automatique du compteur d'alertes toutes les 30 s + au retour sur l'app
+class AdminDashboardScreen extends ConsumerStatefulWidget {
   const AdminDashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AdminDashboardScreen> createState() =>
+      _AdminDashboardScreenState();
+}
+
+class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen>
+    with WidgetsBindingObserver {
+  WidgetRef? _ref;
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _ref?.invalidate(dashboardStatsProvider);
+    _ref?.invalidate(alertsProvider);
+    _ref?.invalidate(unacknowledgedAlertsProvider);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ref = this.ref;
+    _ref = ref;
+    // Polling UI léger des indicateurs (stats/alertes) pendant l'affichage du dashboard.
+    if (_refreshTimer == null && mounted) {
+      _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (mounted && _ref != null) {
+          _ref!.invalidate(dashboardStatsProvider);
+          _ref!.invalidate(alertsProvider);
+          _ref!.invalidate(unacknowledgedAlertsProvider);
+        }
+      });
+    }
+
     final authState = ref.watch(authProvider);
     final user = authState.user;
     final statsAsync = ref.watch(dashboardStatsProvider);
     final patientsAsync = ref.watch(patientsProvider);
 
+    // Notification in-app quand de nouvelles alertes non acquittées apparaissent.
+    ref.listen(unacknowledgedAlertsProvider, (previous, next) {
+      next.whenData((alerts) {
+        if (alerts.isNotEmpty && context.mounted) {
+          final first = alerts.first as Map<String, dynamic>?;
+          final msg = first?['title'] ?? 'Nouvelles mesures reçues';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(msg),
+              action: SnackBarAction(
+                label: 'Voir',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const AlertsScreen(),
+                    ),
+                  );
+                },
+              ),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      });
+    });
+
+    // Dashboard admin: supervision globale + accès rapide aux écrans de gestion.
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -42,6 +116,44 @@ class AdminDashboardScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(
+            icon: ref.watch(unacknowledgedAlertsProvider).when(
+                  data: (alerts) {
+                    final count = alerts.length;
+                    if (count > 0) {
+                      return Badge(
+                        label: Text(
+                          count > 99 ? '99+' : '$count',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.white,
+                          ),
+                        ),
+                        child: const Icon(Icons.notifications_active, size: 20),
+                      );
+                    }
+                    return const Icon(Icons.notifications_active, size: 20);
+                  },
+                  loading: () => const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  error: (_, __) => const Icon(Icons.notifications_off, size: 20),
+                ),
+            tooltip: 'Alertes (nouvelles mesures)',
+            padding: const EdgeInsets.all(8),
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            onPressed: () {
+              ref.invalidate(alertsProvider);
+              ref.invalidate(unacknowledgedAlertsProvider);
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const AlertsScreen(),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings, size: 20),
             tooltip: 'Paramètres',
@@ -111,6 +223,9 @@ class AdminDashboardScreen extends ConsumerWidget {
         onRefresh: () async {
           ref.invalidate(dashboardStatsProvider);
           ref.invalidate(patientsProvider);
+          ref.invalidate(alertsProvider);
+          ref.invalidate(unacknowledgedAlertsProvider);
+          await ref.read(unacknowledgedAlertsProvider.future);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -137,7 +252,7 @@ class AdminDashboardScreen extends ConsumerWidget {
                   childAspectRatio: 1.2,
                   children: [
                     StatCard(
-                      title: 'Total Patients',
+                      title: 'Total Utilisateurs',
                       value: stats['total_patients']?.toString() ?? '0',
                       icon: Icons.people,
                       color: Colors.blue,
@@ -248,7 +363,7 @@ class AdminDashboardScreen extends ConsumerWidget {
                     return const Center(
                       child: Padding(
                         padding: EdgeInsets.all(32.0),
-                        child: Text('Aucun patient trouvé'),
+                        child: Text('Aucun utilisateur trouvé'),
                       ),
                     );
                   }

@@ -7,13 +7,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text  # Pour exécuter des requêtes SQL brutes
 # Utilitaires Python
+from datetime import datetime
 from typing import List, Optional  # Pour typer les listes
 from uuid import UUID  # Pour les identifiants UUID
 
 # Nos modules locaux
 from app.database import get_db  # Fonction pour obtenir une connexion DB
-from app.schemas.device import DeviceCreate, DeviceResponse, DeviceUpdate, DeviceAssign  # Schémas de validation
+from app.schemas.device import DeviceCreate, DeviceResponse, DeviceUpdate, DeviceAssign, DeviceAssignToMe, RegisterByMacRequest  # Schémas de validation
 from app.models.device import DeviceStatus  # Enum pour le statut du device
+from app.api.deps import get_current_user, require_role  # Auth
+from app.models.user import User  # Pour le typage
 
 # ============================================================================
 # CONFIGURATION DU ROUTER
@@ -22,6 +25,108 @@ from app.models.device import DeviceStatus  # Enum pour le statut du device
 # prefix : Toutes les routes commenceront par /api/v1/devices
 # tags : Permet de regrouper les routes dans la documentation Swagger
 router = APIRouter(prefix="/api/v1/devices", tags=["Devices"])
+
+# ============================================================================
+# ROUTE PATIENT (avant /{device_id} pour éviter que "patient" soit pris pour un device_id)
+# POST /api/v1/devices/patient/assign-device
+# ============================================================================
+
+@router.post("/patient/assign-device", response_model=DeviceResponse)
+def assign_device_to_me(
+    body: DeviceAssignToMe,
+    current_user: User = Depends(require_role(["patient"])),
+    db: Session = Depends(get_db),
+):
+    """
+    Un patient s'assigne un pansement à lui-même (body: {"device_id": "<uuid>"}).
+    Nécessaire pour que le backend crée les alertes médecin/admin à la réception des mesures.
+
+    Règles:
+    - Une seule liaison active par device (on ferme l'ancienne avant insertion).
+    - Après assignation, les alertes patient non acquittées sont marquées comme lues
+      côté patient pour repartir d'un état propre.
+    """
+    try:
+        device_uuid = UUID(body.device_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="device_id invalide",
+        )
+    device_result = db.execute(
+        text("SELECT * FROM devices WHERE id = :device_id"),
+        {"device_id": str(device_uuid)},
+    )
+    device_row = device_result.fetchone()
+    if not device_row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pansement non trouvé",
+        )
+    patient_id = str(current_user.id)
+    # Désactiver toute liaison active précédente pour ce device.
+    db.execute(
+        text("""
+            DELETE FROM patient_devices
+            WHERE device_id = :device_id AND is_active = true
+        """),
+        {"device_id": str(device_uuid)},
+    )
+    # Créer la nouvelle liaison active patient <-> device.
+    db.execute(
+        text("""
+            INSERT INTO patient_devices (patient_id, device_id, application_date, is_active)
+            VALUES (:patient_id, :device_id, CURRENT_TIMESTAMP, true)
+        """),
+        {"patient_id": patient_id, "device_id": str(device_uuid)},
+    )
+    # Acquitter les alertes du patient pour ce rôle (patient) après assignation
+    db.execute(
+        text("""
+            UPDATE alerts
+            SET acknowledged_at = CURRENT_TIMESTAMP, acknowledged_by = :user_id
+            WHERE patient_id = :patient_id AND acknowledged_at IS NULL
+        """),
+        {"patient_id": patient_id, "user_id": str(current_user.id)},
+    )
+    db.commit()
+    device_dict = dict(device_row._mapping)
+    patient_result = db.execute(
+        text("""
+            SELECT pd.patient_id, pd.application_date as assigned_at,
+                   u.first_name || ' ' || u.last_name as patient_name
+            FROM patient_devices pd
+            LEFT JOIN users u ON pd.patient_id = u.id
+            WHERE pd.device_id = :device_id AND pd.is_active = true
+        """),
+        {"device_id": str(device_uuid)},
+    ).fetchone()
+    patient_info = dict(patient_result._mapping) if patient_result else None
+    # Éviter None pour model/status (Pydantic exige une chaîne / enum valide)
+    model_val = (device_dict.get("hardware_version") or "") or "PansConnect-V1"
+    raw_status = (device_dict.get("status") or "inactive")
+    try:
+        status_enum = DeviceStatus(str(raw_status).lower())
+    except ValueError:
+        status_enum = DeviceStatus.INACTIVE
+    return {
+        "id": str(device_dict["id"]),
+        "serial_number": device_dict.get("device_id", ""),
+        "model": model_val,
+        "firmware_version": device_dict.get("firmware_version"),
+        "hardware_version": device_dict.get("hardware_version"),
+        "battery_level": device_dict.get("battery_level"),
+        "last_calibration_date": device_dict.get("calibration_date"),
+        "status": status_enum,
+        "patient_id": str(patient_info["patient_id"]) if patient_info and patient_info.get("patient_id") else None,
+        "assigned_at": patient_info["assigned_at"] if patient_info and patient_info.get("assigned_at") else None,
+        "created_at": device_dict["created_at"],
+        "updated_at": device_dict["updated_at"],
+        "last_connection": device_dict.get("last_seen"),
+        "patient_name": patient_info["patient_name"] if patient_info and patient_info.get("patient_name") else None,
+    }
+
+
 # ============================================================================
 # ROUTES CRUD DEVICES
 # ============================================================================
@@ -35,7 +140,13 @@ def get_devices(
     db: Session = Depends(get_db)
 ):
     """
-    Lister tous les pansements (devices)
+    Lister les pansements (devices).
+
+    Notes:
+    - Cette route sert aux écrans de liste (admin/soignant) et aux vues filtrées patient.
+    - Le mapping final normalise certains champs DB vers `DeviceResponse`
+      (ex: `device_id` -> `serial_number`, fallback du `model`).
+
     - **skip**: Nombre d'éléments à sauter (pagination)
     - **limit**: Nombre maximum d'éléments à retourner
     - **status**: Filtrer par statut (optionnel)
@@ -65,30 +176,36 @@ def get_devices(
     
     result = db.execute(text(query), params)
     rows = result.fetchall()
-    
     devices = []
     for row in rows:
         device_dict = dict(row._mapping)
-        
-        # Mapper les champs de la base de données vers le schéma DeviceResponse
+        device_id_val = device_dict.get("id")
+        if device_id_val is None:
+            continue
+        status_raw = (device_dict.get("status") or "inactive").strip().lower()
+        try:
+            status_enum = DeviceStatus(status_raw)
+        except ValueError:
+            status_enum = DeviceStatus.INACTIVE
+        created = device_dict.get("created_at") or datetime.utcnow()
+        updated = device_dict.get("updated_at") or datetime.utcnow()
         device_response = {
-            "id": str(device_dict["id"]),  # UUID -> str
-            "serial_number": device_dict.get("device_id", ""),  # device_id -> serial_number
-            "model": device_dict.get("hardware_version", ""),  # hardware_version -> model
+            "id": str(device_id_val),
+            "serial_number": device_dict.get("device_id") or "",
+            "model": (device_dict.get("hardware_version") or "") or "PansConnect-V1",
             "firmware_version": device_dict.get("firmware_version"),
             "hardware_version": device_dict.get("hardware_version"),
             "battery_level": device_dict.get("battery_level"),
             "last_calibration_date": device_dict.get("calibration_date"),
-            "status": DeviceStatus(device_dict["status"]),  # Convertir string -> enum
-            "patient_id": str(device_dict.get("patient_id")) if device_dict.get("patient_id") else None,
+            "status": status_enum,
+            "patient_id": str(device_dict["patient_id"]) if device_dict.get("patient_id") else None,
             "assigned_at": device_dict.get("assigned_at"),
-            "created_at": device_dict["created_at"],
-            "updated_at": device_dict["updated_at"],
+            "created_at": created,
+            "updated_at": updated,
             "last_connection": device_dict.get("last_seen"),
             "patient_name": device_dict.get("patient_name"),
         }
         devices.append(device_response)
-    
     return devices
 
 @router.post("", response_model=DeviceResponse, status_code=status.HTTP_201_CREATED)
@@ -174,7 +291,7 @@ def create_device(device: DeviceCreate, db: Session = Depends(get_db)):
     device_response = {
         "id": str(device_dict["id"]),
         "serial_number": device_dict.get("device_id", ""),
-        "model": device_dict.get("hardware_version", ""),
+        "model": (device_dict.get("hardware_version") or "") or "PansConnect-V1",
         "firmware_version": device_dict.get("firmware_version"),
         "hardware_version": device_dict.get("hardware_version"),
         "battery_level": device_dict.get("battery_level"),
@@ -189,6 +306,79 @@ def create_device(device: DeviceCreate, db: Session = Depends(get_db)):
     }
     
     return device_response
+
+
+# ============================================================================
+# POST /api/v1/devices/register-by-mac - Enregistrer par MAC (app patient)
+# ============================================================================
+
+@router.post("/register-by-mac", response_model=DeviceResponse, status_code=status.HTTP_201_CREATED)
+def register_device_by_mac(
+    body: RegisterByMacRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Enregistrer un pansement par son adresse MAC. Crée le device si la MAC n'existe pas.
+    Retourne toujours l'UUID du device (id) pour assign-device et create_measurement.
+    """
+    mac = (body.mac_address or "").replace(" ", "").replace("-", ":").upper()
+    if len(mac) < 12 or ":" not in mac:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Format d'adresse MAC invalide (ex: E8:AD:59:A7:7B:E1)",
+        )
+    existing = db.execute(
+        text("SELECT id, device_id, mac_address, status, firmware_version, hardware_version, last_seen, created_at, updated_at FROM devices WHERE mac_address = :mac"),
+        {"mac": mac},
+    ).first()
+    if existing:
+        device_dict = dict(existing._mapping)
+        return {
+            "id": str(device_dict["id"]),
+            "serial_number": device_dict.get("device_id", ""),
+            "model": device_dict.get("hardware_version") or "PansConnect-V1",
+            "firmware_version": device_dict.get("firmware_version"),
+            "hardware_version": device_dict.get("hardware_version"),
+            "battery_level": device_dict.get("battery_level"),
+            "last_calibration_date": device_dict.get("calibration_date"),
+            "status": DeviceStatus(device_dict.get("status") or "inactive"),
+            "patient_id": None,
+            "assigned_at": None,
+            "created_at": device_dict.get("created_at") or datetime.utcnow(),
+            "updated_at": device_dict.get("updated_at") or datetime.utcnow(),
+            "last_connection": device_dict.get("last_seen"),
+            "patient_name": None,
+        }
+    device_id_val = f"PANS-MAC-{mac.replace(':', '')}"
+    result = db.execute(
+        text("""
+            INSERT INTO devices (device_id, mac_address, status, created_at, updated_at)
+            VALUES (:device_id, :mac_address, 'active', :created_at, :updated_at)
+            RETURNING id, device_id, mac_address, firmware_version, hardware_version, status, last_seen, created_at, updated_at
+        """),
+        {"device_id": device_id_val, "mac_address": mac, "created_at": datetime.utcnow(), "updated_at": datetime.utcnow()},
+    )
+    db.commit()
+    row = result.fetchone()
+    device_dict = dict(row._mapping)
+    return {
+        "id": str(device_dict["id"]),
+        "serial_number": device_dict.get("device_id", ""),
+        "model": "PansConnect-V1",
+        "firmware_version": device_dict.get("firmware_version"),
+        "hardware_version": device_dict.get("hardware_version"),
+        "battery_level": None,
+        "last_calibration_date": None,
+        "status": DeviceStatus(device_dict.get("status", "active")),
+        "patient_id": None,
+        "assigned_at": None,
+        "created_at": device_dict.get("created_at"),
+        "updated_at": device_dict.get("updated_at"),
+        "last_connection": device_dict.get("last_seen"),
+        "patient_name": None,
+    }
+
 
 @router.get("/{device_id}", response_model=DeviceResponse)
 def get_device(device_id: UUID, db: Session = Depends(get_db)):
@@ -228,7 +418,7 @@ def get_device(device_id: UUID, db: Session = Depends(get_db)):
     device_response = {
         "id": str(device_dict["id"]),
         "serial_number": device_dict.get("device_id", ""),
-        "model": device_dict.get("hardware_version", ""),
+        "model": (device_dict.get("hardware_version") or "") or "PansConnect-V1",
         "firmware_version": device_dict.get("firmware_version"),
         "hardware_version": device_dict.get("hardware_version"),
         "battery_level": device_dict.get("battery_level"),
@@ -302,7 +492,7 @@ def update_device(
         return {
             "id": str(device_dict["id"]),
             "serial_number": device_dict.get("device_id", ""),
-            "model": device_dict.get("hardware_version", ""),
+            "model": (device_dict.get("hardware_version") or "") or "PansConnect-V1",
             "firmware_version": device_dict.get("firmware_version"),
             "hardware_version": device_dict.get("hardware_version"),
             "battery_level": device_dict.get("battery_level"),
@@ -347,7 +537,7 @@ def update_device(
     device_response = {
         "id": str(device_dict["id"]),
         "serial_number": device_dict.get("device_id", ""),
-        "model": device_dict.get("hardware_version", ""),
+        "model": (device_dict.get("hardware_version") or "") or "PansConnect-V1",
         "firmware_version": device_dict.get("firmware_version"),
         "hardware_version": device_dict.get("hardware_version"),
         "battery_level": device_dict.get("battery_level"),
@@ -363,14 +553,18 @@ def update_device(
     
     return device_response
 
+
 @router.post("/{device_id}/assign", response_model=DeviceResponse)
 def assign_device_to_patient(
     device_id: UUID,
     assign_data: DeviceAssign,
+
+    current_user: User = Depends(require_role(["admin", "medecin"])),
     db: Session = Depends(get_db)
 ):
     """
-    Assigner un device à un patient
+    Assigner un device à un patient (admin ou médecin uniquement).
+    Après assignation, les alertes de ce patient sont acquittées pour le rôle courant (médecin/admin).
     """
     # Vérifier que le device existe
     device_result = db.execute(
@@ -417,6 +611,26 @@ def assign_device_to_patient(
             "device_id": str(device_id)
         }
     )
+    # Acquitter les alertes de ce patient pour le rôle courant (médecin ou admin)
+    now = datetime.utcnow()
+    if current_user.role == "medecin":
+        db.execute(
+            text("""
+                UPDATE alerts
+                SET acknowledged_by_medecin_at = :now
+                WHERE patient_id = :patient_id AND acknowledged_by_medecin_at IS NULL
+            """),
+            {"patient_id": assign_data.patient_id, "now": now},
+        )
+    elif current_user.role == "admin":
+        db.execute(
+            text("""
+                UPDATE alerts
+                SET acknowledged_by_admin_at = :now
+                WHERE patient_id = :patient_id AND acknowledged_by_admin_at IS NULL
+            """),
+            {"patient_id": assign_data.patient_id, "now": now},
+        )
     
     db.commit()
     
@@ -437,7 +651,7 @@ def assign_device_to_patient(
     device_response = {
         "id": str(device_dict["id"]),
         "serial_number": device_dict.get("device_id", ""),
-        "model": device_dict.get("hardware_version", ""),
+        "model": (device_dict.get("hardware_version") or "") or "PansConnect-V1",
         "firmware_version": device_dict.get("firmware_version"),
         "hardware_version": device_dict.get("hardware_version"),
         "battery_level": device_dict.get("battery_level"),

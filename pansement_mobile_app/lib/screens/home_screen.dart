@@ -35,6 +35,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final pushNotificationsEnabled =
         prefs.getBool('notifications_push_enabled') ?? true;
 
+    // Polling centralisé des notifications locales (commentaires/alertes).
     if (pushNotificationsEnabled) {
       ref.read(notificationPollingProvider.notifier).startPolling();
     }
@@ -50,7 +51,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return const LoginScreen();
     }
 
-    // Écrans selon le rôle
+    // La navigation principale est déterminée côté rôle.
+    // Le backend reste la source d'autorité pour les permissions réelles.
     final screens = _getScreensForRole(user.role);
     final navItems = _getNavItemsForRole(user.role);
 
@@ -92,7 +94,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       case 'patient':
         return [
           const DashboardScreen(),
-          const CommentsListScreen(), // Écran des commentaires pour les patients
+          // Patient: accès direct à ses commentaires depuis l'onglet principal.
+          const CommentsListScreen(),
           const ScanScreen(),
           const ProfileScreen(),
         ];
@@ -114,7 +117,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.people),
-            label: 'Patients',
+            label: 'Utilisateurs',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.bluetooth),

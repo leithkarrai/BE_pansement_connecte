@@ -10,10 +10,20 @@ dependencies:
   flutter:
     sdk: flutter
   
-  # BLE (Bluetooth Low Energy)
+  # Deep links (epatch://pair pour NFC)
+  app_links: ^6.3.2
+
+  # NFC (lecture tag sur DeviceConnectionScreen)
+  nfc_manager: ^4.0.0
+  nfc_manager_ndef: ^1.0.1
+
+  # BLE (scan / connexion)
   flutter_blue_plus: ^1.31.0
-  permission_handler: ^11.0.1
-  
+  flutter_reactive_ble: ^5.4.0
+
+  # Permissions (runtime) — ^12 pour éviter PluginRegistry.Registrar (embedding v2)
+  permission_handler: ^12.0.0
+
   # HTTP & API
   dio: ^5.4.0
   flutter_secure_storage: ^9.0.0
@@ -39,6 +49,17 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/
+
+# Icône de l'app (logo E-PATCH) — lancer: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/images/logo.png"

@@ -12,7 +12,7 @@ import '../services/api_service.dart';
 final deviceDetailProvider =
     FutureProvider.family<Device, String>((ref, deviceId) async {
   final apiService = ref.watch(apiServiceProvider);
-  // Charger le token avant l'appel
+  // Charger le token local avant l'appel API (provider utilisé hors flux login immédiat).
   try {
     const storage = FlutterSecureStorage();
     final token = await storage.read(key: 'access_token');
@@ -44,7 +44,7 @@ class ApiDeviceDetailScreen extends ConsumerStatefulWidget {
 class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
   final _storage = const FlutterSecureStorage();
 
-  // Helper method pour charger le token dans ApiService
+  // Helper: injecte le token JWT dans ApiService pour les actions de cet écran.
   Future<void> _ensureTokenLoaded(ApiService apiService) async {
     try {
       final token = await _storage.read(key: 'access_token');
@@ -59,21 +59,29 @@ class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
     }
   }
 
-  // Helper method pour afficher un SnackBar de manière sûre
+  // Helper: SnackBar robuste même quand l'écran est en transition.
   void _showSnackBar(String message,
       {Color? backgroundColor, Duration? duration}) {
     if (!mounted) return;
-    try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: backgroundColor ?? Colors.grey,
-          duration: duration ?? const Duration(seconds: 3),
-        ),
-      );
-    } catch (e) {
-      debugPrint('❌ Erreur lors de l\'affichage du SnackBar: $e');
-    }
+
+    // Utiliser Future.microtask pour éviter les erreurs de widget désactivé
+    Future.microtask(() {
+      if (!mounted) return;
+      final scaffoldMessenger = ScaffoldMessenger.maybeOf(context);
+      if (scaffoldMessenger != null && mounted) {
+        try {
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: Text(message),
+              backgroundColor: backgroundColor ?? Colors.grey,
+              duration: duration ?? const Duration(seconds: 3),
+            ),
+          );
+        } catch (e) {
+          debugPrint('❌ Erreur lors de l\'affichage du SnackBar: $e');
+        }
+      }
+    });
   }
 
   @override
@@ -82,7 +90,7 @@ class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
     final deviceAsync = ref.watch(deviceDetailProvider(widget.deviceId));
     final currentUser = ref.watch(authProvider).user;
 
-    // Logs de débogage pour comprendre l'état
+    // Logs utiles en debug pour diagnostiquer les problèmes de permissions/token.
     debugPrint('🔍 DEBUG ApiDeviceDetailScreen:');
     debugPrint('   - Device ID: ${widget.deviceId}');
     debugPrint('   - Current User: ${currentUser?.email ?? "null"}');
@@ -90,6 +98,8 @@ class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
     debugPrint(
         '   - Is Admin/Medecin: ${currentUser?.role == 'admin' || currentUser?.role == 'medecin'}');
 
+    // Détail device orienté exploitation:
+    // identité device, statut, assignation patient, actions de gestion.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Détails de l\'appareil'),
@@ -568,6 +578,8 @@ class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
     BuildContext context,
     String newStatus,
   ) async {
+    debugPrint(
+        '🔄 _updateStatus appelé avec status: $newStatus pour device ${widget.deviceId}');
     if (!mounted) return;
 
     debugPrint(
@@ -600,14 +612,21 @@ class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
 
       if (!mounted) return;
 
+      // Rafraîchir les données AVANT d'afficher le SnackBar
+      debugPrint('🔄 Invalidation des providers...');
+      ref.invalidate(deviceDetailProvider(widget.deviceId));
+      ref.invalidate(devicesProvider);
+      debugPrint('✅ Providers invalidés, l\'écran devrait se rafraîchir');
+
+      // Attendre un peu pour que l'invalidation prenne effet
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      if (!mounted) return;
+
       _showSnackBar(
         'Statut mis à jour: ${_getStatusLabel(newStatus)}',
         backgroundColor: Colors.green,
       );
-
-      // Rafraîchir les données
-      ref.invalidate(deviceDetailProvider(widget.deviceId));
-      ref.invalidate(devicesProvider);
     } catch (e, stackTrace) {
       debugPrint('❌ Erreur lors de la mise à jour du statut: $e');
       debugPrint('Stack trace: $stackTrace');
@@ -688,28 +707,56 @@ class _ApiDeviceDetailScreenState extends ConsumerState<ApiDeviceDetailScreen> {
 
       if (!mounted) return;
 
+      // Rafraîchir les données AVANT d'afficher le SnackBar
+      debugPrint('🔄 Invalidation des providers après désassignation...');
+      ref.invalidate(deviceDetailProvider(widget.deviceId));
+      ref.invalidate(devicesProvider);
+      debugPrint('✅ Providers invalidés après désassignation');
+
+      // Attendre un peu pour que l'invalidation prenne effet
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      if (!mounted) return;
+
       _showSnackBar(
         'Patient désassigné avec succès',
         backgroundColor: Colors.green,
       );
-
-      // Rafraîchir les données
-      ref.invalidate(deviceDetailProvider(widget.deviceId));
-      ref.invalidate(devicesProvider);
     } catch (e, stackTrace) {
       debugPrint('❌ Erreur lors de la désassignation: $e');
       debugPrint('Stack trace: $stackTrace');
+
       if (!mounted) return;
 
       // Fermer le dialogue de chargement s'il est ouvert
-      if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
+      try {
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+      } catch (navError) {
+        debugPrint('⚠️ Erreur lors de la fermeture du dialogue: $navError');
       }
 
       if (!mounted) return;
 
+      // Extraire un message d'erreur plus lisible
+      String errorMessage = 'Erreur lors de la désassignation';
+      final errorStr = e.toString();
+      if (errorStr.contains('No route to host') ||
+          errorStr.contains('connection')) {
+        errorMessage =
+            'Impossible de se connecter au serveur. Vérifiez votre connexion réseau.';
+      } else if (errorStr.contains('timeout')) {
+        errorMessage =
+            'Timeout de connexion. Le serveur met trop de temps à répondre.';
+      } else if (errorStr.contains('Exception:')) {
+        errorMessage = errorStr.replaceAll('Exception: ', '');
+      } else {
+        errorMessage = errorStr;
+      }
+
       _showSnackBar(
-        'Erreur: ${e.toString()}',
+        errorMessage,
         backgroundColor: Colors.red,
         duration: const Duration(seconds: 5),
       );

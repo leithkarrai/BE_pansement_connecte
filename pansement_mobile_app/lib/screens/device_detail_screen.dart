@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../providers/ble_provider.dart';
 import '../providers/auth_provider.dart';
-import 'measurements_screen.dart';
 
 class DeviceDetailScreen extends ConsumerStatefulWidget {
   final BluetoothDevice device;
@@ -59,6 +58,7 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
     });
 
     try {
+      // Connexion BLE directe depuis la fiche device.
       final bleService = ref.read(bleServiceProvider);
       await bleService.connectToDevice(widget.device);
 
@@ -134,6 +134,7 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
     });
 
     try {
+      // Lecture ponctuelle des mesures (mode manuel).
       final bleService = ref.read(bleServiceProvider);
       final measurements = await bleService.readMeasurements(widget.device);
 
@@ -170,16 +171,16 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
       return;
     }
 
-    // Les notifications sont gérées automatiquement via les callbacks
-    // du BleService après la connexion
-    final bleService = ref.read(bleServiceProvider);
-    bleService.onDataReceived = (measurements) {
-      if (mounted) {
-        setState(() {
-          _measurements = measurements;
-        });
-      }
-    };
+    // Ne pas écraser bleService.onDataReceived : le provider (DeviceConnectionNotifier)
+    // est le seul à devoir recevoir les données pour éviter que DeviceConnectionScreen
+    // ne reçoive plus rien. On lance la collecte via le provider.
+    ref.read(deviceConnectionProvider(widget.device).notifier).readMeasurements(forceRead: false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Collecte en cours… Les données s\'afficheront si le pansement envoie.'),
+        backgroundColor: Colors.blue,
+      ),
+    );
   }
 
   Future<void> _sendToBackend() async {
@@ -204,7 +205,7 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
         throw Exception('Utilisateur non connecté');
       }
 
-      // TODO: Implémenter l'envoi des mesures au backend
+      // TODO: brancher l'envoi réel API ici (actuellement simulation).
       // Pour l'instant, on simule l'envoi
       // final apiService = ref.read(apiServiceProvider);
       // await apiService.createMeasurement(...);
@@ -240,29 +241,15 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final connectionState = ref.watch(deviceConnectionProvider(widget.device));
     final isConnected = _connectionState == BluetoothConnectionState.connected;
+    final measurements = connectionState.measurements ?? _measurements;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.device.platformName.isNotEmpty
             ? widget.device.platformName
             : 'Pansement'),
-        actions: [
-          if (isConnected)
-            IconButton(
-              icon: const Icon(Icons.analytics),
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => MeasurementsScreen(
-                      device: widget.device,
-                    ),
-                  ),
-                );
-              },
-              tooltip: 'Voir les mesures',
-            ),
-        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -349,8 +336,8 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
               ),
             ],
 
-            // Mesures
-            if (_measurements != null) ...[
+            // Mesures (provider ou état local)
+            if (measurements != null) ...[
               const SizedBox(height: 24),
               Card(
                 child: Padding(
@@ -365,23 +352,9 @@ class _DeviceDetailScreenState extends ConsumerState<DeviceDetailScreen> {
                       const Divider(),
                       _buildMeasurementRow(
                         'Température',
-                        '${_measurements!['temperature']?.toStringAsFixed(2) ?? 'N/A'} °C',
+                        '${measurements['temperature']?.toStringAsFixed(2) ?? 'N/A'} °C',
                         Icons.thermostat,
                         Colors.red,
-                      ),
-                      const SizedBox(height: 12),
-                      _buildMeasurementRow(
-                        'Humidité',
-                        '${_measurements!['humidity']?.toStringAsFixed(2) ?? 'N/A'} %',
-                        Icons.water_drop,
-                        Colors.blue,
-                      ),
-                      const SizedBox(height: 12),
-                      _buildMeasurementRow(
-                        'pH',
-                        '${_measurements!['ph']?.toStringAsFixed(2) ?? 'N/A'}',
-                        Icons.science,
-                        Colors.purple,
                       ),
                       const SizedBox(height: 16),
                       ElevatedButton.icon(

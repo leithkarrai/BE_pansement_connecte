@@ -4,8 +4,19 @@ Client MinIO pour stockage de fichiers (S3-compatible)
 from minio import Minio
 from minio.error import S3Error
 import os
+import sys
 from typing import Optional
 from datetime import timedelta
+
+
+def _safe_print(msg: str) -> None:
+    """Message ASCII pour eviter UnicodeEncodeError (Windows cp1252)."""
+    safe = (msg or "").encode("ascii", "replace").decode("ascii")
+    try:
+        print(safe)
+    except Exception:
+        sys.stderr.buffer.write(safe.encode("ascii") + b"\n")
+        sys.stderr.buffer.flush()
 
 # Configuration MinIO
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
@@ -39,7 +50,7 @@ def get_minio_client() -> Minio:
             # Tester la connexion en listant les buckets
             _minio_client.list_buckets()
         except Exception as e:
-            print(f"⚠️ Erreur connexion MinIO: {e}")
+            _safe_print(f"[WARN] Erreur connexion MinIO: {e}")
             _minio_client = None
     return _minio_client
 
@@ -61,13 +72,13 @@ def create_bucket_if_not_exists(bucket_name: str) -> bool:
         
         if not client.bucket_exists(bucket_name):
             client.make_bucket(bucket_name)
-            print(f"✅ Bucket '{bucket_name}' créé")
+            _safe_print(f"[OK] Bucket '{bucket_name}' cree")
         return True
     except S3Error as e:
-        print(f"⚠️ Erreur MinIO lors de la création du bucket '{bucket_name}': {e}")
+        _safe_print(f"[WARN] Erreur MinIO lors de la création du bucket '{bucket_name}': {e}")
         return False
     except Exception as e:
-        print(f"⚠️ Erreur inattendue lors de la création du bucket '{bucket_name}': {e}")
+        _safe_print(f"[WARN] Erreur inattendue lors de la création du bucket '{bucket_name}': {e}")
         return False
 
 
@@ -115,10 +126,10 @@ def upload_file(
         # Retourner le chemin du fichier
         return f"/{bucket_name}/{object_name}"
     except S3Error as e:
-        print(f"⚠️ Erreur MinIO lors de l'upload de '{object_name}': {e}")
+        _safe_print(f"[WARN] Erreur MinIO lors de l'upload de '{object_name}': {e}")
         return None
     except Exception as e:
-        print(f"⚠️ Erreur inattendue lors de l'upload de '{object_name}': {e}")
+        _safe_print(f"[WARN] Erreur inattendue lors de l'upload de '{object_name}': {e}")
         return None
 
 
@@ -144,10 +155,10 @@ def download_file(bucket_name: str, object_name: str) -> Optional[bytes]:
         response.release_conn()
         return data
     except S3Error as e:
-        print(f"⚠️ Erreur MinIO lors du téléchargement de '{object_name}': {e}")
+        _safe_print(f"[WARN] Erreur MinIO lors du téléchargement de '{object_name}': {e}")
         return None
     except Exception as e:
-        print(f"⚠️ Erreur inattendue lors du téléchargement de '{object_name}': {e}")
+        _safe_print(f"[WARN] Erreur inattendue lors du téléchargement de '{object_name}': {e}")
         return None
 
 
@@ -170,10 +181,10 @@ def delete_file(bucket_name: str, object_name: str) -> bool:
         client.remove_object(bucket_name, object_name)
         return True
     except S3Error as e:
-        print(f"⚠️ Erreur MinIO lors de la suppression de '{object_name}': {e}")
+        _safe_print(f"[WARN] Erreur MinIO lors de la suppression de '{object_name}': {e}")
         return False
     except Exception as e:
-        print(f"⚠️ Erreur inattendue lors de la suppression de '{object_name}': {e}")
+        _safe_print(f"[WARN] Erreur inattendue lors de la suppression de '{object_name}': {e}")
         return False
 
 
@@ -197,10 +208,10 @@ def get_file_url(bucket_name: str, object_name: str, expires: int = 3600) -> Opt
         url = client.presigned_get_object(bucket_name, object_name, expires=timedelta(seconds=expires))
         return url
     except S3Error as e:
-        print(f"⚠️ Erreur MinIO lors de la génération de l'URL pour '{object_name}': {e}")
+        _safe_print(f"[WARN] Erreur MinIO lors de la génération de l'URL pour '{object_name}': {e}")
         return None
     except Exception as e:
-        print(f"⚠️ Erreur inattendue lors de la génération de l'URL pour '{object_name}': {e}")
+        _safe_print(f"[WARN] Erreur inattendue lors de la génération de l'URL pour '{object_name}': {e}")
         return None
 
 
@@ -243,10 +254,10 @@ def test_minio_connection() -> bool:
         client.list_buckets()
         return True
     except S3Error as e:
-        print(f"⚠️ Erreur connexion MinIO: {e}")
+        _safe_print(f"[WARN] Erreur connexion MinIO: {e}")
         return False
     except Exception as e:
-        print(f"⚠️ Erreur inattendue lors de la connexion MinIO: {e}")
+        _safe_print(f"[WARN] Erreur inattendue lors de la connexion MinIO: {e}")
         return False
 
 

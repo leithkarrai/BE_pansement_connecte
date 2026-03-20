@@ -21,6 +21,24 @@ class UserBase(BaseModel):
     gender: Optional[str] = Field(None, max_length=10)
 
 
+# Inscription (role optionnel : inféré côté backend si absent)
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=12, max_length=100, description="Minimum 12 caractères avec majuscule, minuscule, chiffre et symbole")
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    role: Optional[UserRole] = None
+    phone: Optional[str] = Field(None, max_length=20)
+    date_of_birth: Optional[date] = None
+    gender: Optional[str] = Field(None, max_length=10)
+    medical_record_number: Optional[str] = None
+    blood_type: Optional[str] = None
+    allergies: Optional[str] = None
+    rpps_number: Optional[str] = Field(None, max_length=11, description="Numéro RPPS (11 chiffres)")
+    specialty: Optional[str] = Field(None, max_length=100, description="Spécialité médicale")
+    establishment: Optional[str] = Field(None, max_length=255, description="Établissement de santé")
+
+
 # Création d'utilisateur (avec mot de passe)
 class UserCreate(UserBase):
     password: str = Field(..., min_length=12, max_length=100, description="Minimum 12 caractères avec majuscule, minuscule, chiffre et symbole")

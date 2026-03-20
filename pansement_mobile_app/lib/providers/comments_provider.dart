@@ -12,7 +12,8 @@ import 'auth_provider.dart';
 // PROVIDERS
 // ============================================
 
-/// Provider pour récupérer les commentaires d'un patient
+/// Charge les commentaires d'un patient.
+/// Le backend applique les règles de visibilité par rôle (patient/médecin/admin).
 final patientCommentsProvider = FutureProvider.family<List<Comment>, String>(
   (ref, patientId) async {
     final apiService = ref.watch(apiServiceProvider);
@@ -27,7 +28,7 @@ final patientCommentsProvider = FutureProvider.family<List<Comment>, String>(
   },
 );
 
-/// Provider pour le nombre de commentaires non lus
+/// Compteur de commentaires non lus (badge/indicateur UI).
 final unreadCommentsCountProvider = FutureProvider.family<int, String>(
   (ref, patientId) async {
     final apiService = ref.watch(apiServiceProvider);
@@ -40,7 +41,8 @@ final unreadCommentsCountProvider = FutureProvider.family<int, String>(
   },
 );
 
-/// Notifier pour gérer les actions sur les commentaires
+/// Notifier d'actions CRUD sur les commentaires.
+/// Expose un état simple: loading / erreur / message de succès.
 final commentsNotifierProvider =
     StateNotifierProvider<CommentsNotifier, CommentsState>((ref) {
   return CommentsNotifier(ref.read(apiServiceProvider));
@@ -55,6 +57,8 @@ class CommentsState {
   final String? error;
   final String? successMessage;
 
+  /// `successMessage` est volontairement séparé de `error`
+  /// pour simplifier l'affichage SnackBar côté écrans.
   CommentsState({
     this.isLoading = false,
     this.error,
@@ -173,7 +177,7 @@ class CommentsNotifier extends StateNotifier<CommentsState> {
     }
   }
 
-  /// Réinitialiser l'état
+  /// Réinitialise l'état transitoire après affichage d'un feedback UI.
   void resetState() {
     state = CommentsState();
   }

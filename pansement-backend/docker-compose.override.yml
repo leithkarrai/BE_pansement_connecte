@@ -1,0 +1,19 @@
+# Override pour lancer le backend en Docker quand le réseau "pansement_network" n'est pas dispo.
+# Le backend se connecte à Postgres/Redis via l'hôte (host.docker.internal = ta machine).
+#
+# Prérequis : Postgres et Redis doivent tourner et exposer 5432 et 6379 sur l'hôte
+# (ex. docker start pansement_postgres pansement_redis depuis pansement-connecte-db).
+#
+# Pour utiliser le réseau Docker à la place : renommer ce fichier (ex. .disabled)
+# puis lancer d'abord pansement-connecte-db, puis pansement-backend.
+
+services:
+  backend:
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres_password_change_me@host.docker.internal:5432/pansement_connecte
+      REDIS_HOST: host.docker.internal
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: redis_password_change_me
+      MINIO_ENDPOINT: host.docker.internal
+    networks:
+      - default

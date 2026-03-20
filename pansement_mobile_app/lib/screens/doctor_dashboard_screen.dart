@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/alerts_provider.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/patient_list_tile.dart';
 import 'login_screen.dart';
@@ -11,16 +13,113 @@ import 'alerts_screen.dart';
 import 'settings_screen.dart';
 
 /// Dashboard Médecin - Vue des patients assignés
-class DoctorDashboardScreen extends ConsumerWidget {
+/// Actualisation automatique des alertes + notification in-app au retour sur l'app
+class DoctorDashboardScreen extends ConsumerStatefulWidget {
   const DoctorDashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DoctorDashboardScreen> createState() =>
+      _DoctorDashboardScreenState();
+}
+
+class _DoctorDashboardScreenState extends ConsumerState<DoctorDashboardScreen>
+    with WidgetsBindingObserver {
+  WidgetRef? _ref;
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _ref?.invalidate(dashboardStatsProvider);
+    _ref?.invalidate(alertsProvider);
+    _ref?.invalidate(unacknowledgedAlertsProvider);
+    Future.delayed(const Duration(milliseconds: 800), () async {
+      if (!mounted || _ref == null) return;
+      try {
+        final alerts = await _ref!.read(unacknowledgedAlertsProvider.future);
+        if (alerts.isNotEmpty && mounted) {
+          final first = alerts.first as Map<String, dynamic>?;
+          final msg = first?['title'] ?? 'Nouvelles mesures reçues';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(msg),
+              action: SnackBarAction(
+                label: 'Voir',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const AlertsScreen(),
+                    ),
+                  );
+                },
+              ),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      } catch (_) {}
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _ref = ref;
+    // Rafraîchissement périodique des compteurs d'alertes/stats pendant la consultation.
+    if (_refreshTimer == null && mounted) {
+      _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (mounted && _ref != null) {
+          _ref!.invalidate(dashboardStatsProvider);
+          _ref!.invalidate(alertsProvider);
+          _ref!.invalidate(unacknowledgedAlertsProvider);
+        }
+      });
+    }
+
+    // Feedback in-app à l'arrivée de nouvelles alertes non lues.
+    ref.listen(unacknowledgedAlertsProvider, (previous, next) {
+      next.whenData((alerts) {
+        if (alerts.isNotEmpty && context.mounted) {
+          final first = alerts.first as Map<String, dynamic>?;
+          final msg = first?['title'] ?? 'Nouvelles mesures reçues';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(msg),
+              action: SnackBarAction(
+                label: 'Voir',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const AlertsScreen(),
+                    ),
+                  );
+                },
+              ),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      });
+    });
+
     final authState = ref.watch(authProvider);
     final user = authState.user;
     final statsAsync = ref.watch(dashboardStatsProvider);
     final patientsAsync = ref.watch(patientsProvider);
 
+    // Dashboard médecin: vue orientée patients suivis + alertes actionnables.
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -32,9 +131,37 @@ class DoctorDashboardScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications_active),
-            tooltip: 'Alertes',
+            icon: ref.watch(unacknowledgedAlertsProvider).when(
+                  data: (alerts) {
+                    final count = alerts.length;
+                    if (count > 0) {
+                      return Badge(
+                        label: Text(
+                          count > 99 ? '99+' : '$count',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white,
+                          ),
+                        ),
+                        child: const Icon(Icons.notifications_active),
+                      );
+                    }
+                    return const Icon(Icons.notifications_active);
+                  },
+                  loading: () => const Padding(
+                    padding: EdgeInsets.only(right: 8),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                  error: (_, __) => const Icon(Icons.notifications_off),
+                ),
+            tooltip: 'Alertes (nouvelles mesures)',
             onPressed: () {
+              ref.invalidate(alertsProvider);
+              ref.invalidate(unacknowledgedAlertsProvider);
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => const AlertsScreen(),
@@ -112,6 +239,7 @@ class DoctorDashboardScreen extends ConsumerWidget {
         onRefresh: () async {
           ref.invalidate(dashboardStatsProvider);
           ref.invalidate(patientsProvider);
+          ref.invalidate(alertsProvider);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -119,6 +247,52 @@ class DoctorDashboardScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Bannière "nouvelles alertes" dans l'application (visible sur l'écran)
+              statsAsync.when(
+                data: (stats) {
+                  final unack = stats['alerts_unacknowledged'] ?? 0;
+                  if (unack <= 0) return const SizedBox.shrink();
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.notifications_active, color: Colors.orange.shade800, size: 28),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Vous avez $unack alerte(s) à consulter',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.orange.shade900,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            ref.invalidate(alertsProvider);
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const AlertsScreen(),
+                              ),
+                            );
+                          },
+                          child: const Text('Voir'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
               // Statistiques des patients
               Text(
                 'Mes patients',

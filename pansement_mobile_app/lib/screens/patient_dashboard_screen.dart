@@ -6,6 +6,7 @@ import '../providers/measurements_provider.dart';
 import '../widgets/stat_card.dart';
 import 'login_screen.dart';
 import 'patient_detail_screen.dart';
+import 'patient_wound_status_screen.dart';
 import 'alerts_screen.dart';
 import 'settings_screen.dart';
 
@@ -21,7 +22,7 @@ class PatientDashboardScreen extends ConsumerWidget {
     // Si l'utilisateur est un patient, utiliser son propre ID
     final patientId = user?.id;
 
-    // Toujours créer le provider, même si patientId est null (pour éviter les problèmes)
+    // Provider stats créé systématiquement pour garder un build stable.
     final statsAsync = ref.watch(
       patientStatsProvider({
         'patientId': patientId ?? '',
@@ -31,6 +32,7 @@ class PatientDashboardScreen extends ConsumerWidget {
     final devicesAsync =
         patientId != null ? ref.watch(patientDevicesProvider(patientId)) : null;
 
+    // Dashboard patient: espace personnel (infos, device, état de plaie, mesures récentes).
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -204,6 +206,73 @@ class PatientDashboardScreen extends ConsumerWidget {
                     ),
 
                     const SizedBox(height: 24),
+
+                    // État complet du patient (état de la plaie, résumé, évolution)
+                    if (user != null)
+                      Card(
+                        elevation: 2,
+                        child: InkWell(
+                          onTap: () {
+                            final bool forMedecin =
+                                user.role.toLowerCase() != 'patient';
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => PatientWoundStatusScreen(
+                                  patient: user,
+                                  forMedecin: forMedecin,
+                                ),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .primaryColor
+                                        .withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(
+                                    Icons.favorite,
+                                    color: Theme.of(context).primaryColor,
+                                    size: 32,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Mon état complet',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'État de la plaie, résumé et évolution',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.grey[600],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+
+                    if (user != null) const SizedBox(height: 24),
 
                     // Appareils assignés
                     Text(

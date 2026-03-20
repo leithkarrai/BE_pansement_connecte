@@ -5,14 +5,13 @@ class ApiConfig {
   // Clé pour stocker l'URL du backend dans SharedPreferences
   static const String _backendUrlKey = 'backend_base_url';
 
-  // URL par défaut - sera utilisée si aucune URL n'est sauvegardée
-  // ⚠️ Pour l'émulateur Android : utiliser http://10.0.2.2:8000/api/v1
-  // ⚠️ Pour un appareil physique : utiliser l'IP WiFi de ton PC (pas l'IP Docker/WSL)
-  // Trouver l'IP WiFi : Windows: ipconfig | findstr IPv4 (chercher l'interface Wi-Fi)
-  // IP WiFi actuelle : 172.16.121.161
-  static const String _defaultUrl = 'http://172.16.121.161:8000/api/v1';
+  // URL par défaut - IP du PC sur le Wi-Fi (obligatoire pour téléphone réel).
+  // 1) Sur le PC : ouvrir CMD → ipconfig → noter "Adresse IPv4" de la carte Wi-Fi.
+  // 2) Remplacer par cette IP si tu changes de réseau (ou dans l'app : Paramètres > URL du serveur).
+  // Émulateur Android : utiliser http://10.0.2.2:8000/api/v1
+  static const String _defaultUrl = 'http://192.168.1.200:8000/api/v1';
 
-  // URL de base - peut être changée dynamiquement
+  // URL de base - peut être changée dynamiquement (Paramètres > URL du serveur)
   static String _baseUrl = _defaultUrl;
 
   /// Récupère l'URL de base du backend
@@ -27,7 +26,6 @@ class ApiConfig {
         _baseUrl = _defaultUrl;
       }
     } catch (e) {
-      // En cas d'erreur, utiliser l'URL par défaut
       _baseUrl = _defaultUrl;
     }
     return _baseUrl;
@@ -94,9 +92,8 @@ class ApiConfig {
   static const String alerts = '/alerts';
   static const String comments = '/comments';
 
-  // Config
-  static const Duration timeout =
-      Duration(seconds: 60); // Augmenté pour les connexions lentes
+  // Config - délai de connexion (réseau local Wi‑Fi parfois lent)
+  static const Duration timeout = Duration(seconds: 45);
 
   // BLE Configuration
   static const String deviceNamePrefix =

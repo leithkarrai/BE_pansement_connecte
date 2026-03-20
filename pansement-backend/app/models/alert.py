@@ -37,6 +37,13 @@ class Alert(Base):
     triggered_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     acknowledged_at = Column(DateTime, nullable=True)
     acknowledged_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    # Acquittement par rôle : médecin et admin ont chacun leur "vu" (patient utilise acknowledged_at)
+    acknowledged_by_medecin_at = Column(DateTime, nullable=True)
+    acknowledged_by_admin_at = Column(DateTime, nullable=True)
+    # Suppression par rôle : chacun masque de son côté sans supprimer en base
+    deleted_at = Column(DateTime, nullable=True)  # patient
+    deleted_by_medecin_at = Column(DateTime, nullable=True)
+    deleted_by_admin_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
     resolved_by = Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     resolution_note = Column(Text, nullable=True)

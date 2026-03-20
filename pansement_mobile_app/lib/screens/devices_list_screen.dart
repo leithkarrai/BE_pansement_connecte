@@ -27,7 +27,7 @@ class _DevicesListScreenState extends ConsumerState<DevicesListScreen> {
   List<Device> _filterDevices(List<Device> devices) {
     var filtered = devices;
 
-    // Filtre par recherche (numéro de série, modèle)
+    // Filtre texte local (numéro, modèle, nom patient).
     if (_searchController.text.isNotEmpty) {
       final searchLower = _searchController.text.toLowerCase();
       filtered = filtered.where((device) {
@@ -38,7 +38,7 @@ class _DevicesListScreenState extends ConsumerState<DevicesListScreen> {
       }).toList();
     }
 
-    // Filtre par statut
+    // Filtre statut local.
     if (_selectedStatus != null) {
       filtered = filtered
           .where((device) => device.status.toLowerCase() == _selectedStatus)
@@ -52,6 +52,8 @@ class _DevicesListScreenState extends ConsumerState<DevicesListScreen> {
   Widget build(BuildContext context) {
     final devicesAsync = ref.watch(devicesProvider);
 
+    // Liste opérationnelle des devices:
+    // recherche + filtres + stats rapides + navigation vers le détail.
     return Scaffold(
       appBar: AppBar(
         title: _isSearchExpanded

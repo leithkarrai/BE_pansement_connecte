@@ -1,9 +1,10 @@
-﻿from fastapi import FastAPI, Depends, Request, Response
+from fastapi import FastAPI, Depends, Request, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.database import get_db, check_db_connection, get_db_info, init_db
+from app.database import get_db, check_db_connection, get_db_info, init_db, _safe_print
 from app.api import auth, users, devices, measurements, files, alerts, comments
 from app.core.redis_client import test_redis_connection
 from app.core.minio_client import test_minio_connection, initialize_buckets
@@ -52,34 +53,52 @@ app.include_router(files.router, tags=['Files'])
 app.include_router(alerts.router, tags=['Alerts'])
 app.include_router(comments.router, tags=['Comments'])
 
+
+def _safe_error_detail(exc: Exception) -> str:
+    """Message d'erreur ASCII pour reponse JSON (evite problemes encodage)."""
+    return (str(exc) or repr(exc)).encode("ascii", "replace").decode("ascii")
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Retourne 500 avec le detail de l'erreur (sauf HTTPException geree par FastAPI)."""
+    if isinstance(exc, HTTPException):
+        raise exc
+    detail = _safe_error_detail(exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": detail, "type": type(exc).__name__},
+    )
+
+
 @app.on_event('startup')
 async def startup():
-    print('🚀 Démarrage de Pansement Connecté API')
+    _safe_print('[OK] Demarrage Pansement Connecte API')
     if check_db_connection():
-        print('✅ PostgreSQL connecté')
+        _safe_print('[OK] PostgreSQL connecte')
         # Créer les tables si elles n'existent pas
         try:
             init_db()
         except Exception as e:
-            print(f'⚠️  Erreur création tables: {e}')
+            _safe_print(f'[WARN] Erreur creation tables: {e}')
         info = get_db_info()
-        print(f'   📊 Tables: {info.get("tables", 0)}')
-        print(f'   👥 Users: {info.get("users", 0)}')
-        print(f'   📟 Devices: {info.get("devices", 0)}')
-        print(f'   📈 Measurements: {info.get("measurements", 0)}')
+        _safe_print(f'   Tables: {info.get("tables", 0)}')
+        _safe_print(f'   Users: {info.get("users", 0)}')
+        _safe_print(f'   Devices: {info.get("devices", 0)}')
+        _safe_print(f'   Measurements: {info.get("measurements", 0)}')
     else:
-        print('⚠️  PostgreSQL non connecté')
+        _safe_print('[WARN] PostgreSQL non connecte')
     
     if test_redis_connection():
-        print('✅ Redis connecté (cache activé)')
+        _safe_print('[OK] Redis connecte (cache active)')
     else:
-        print('⚠️  Redis non connecté (cache désactivé)')
+        _safe_print('[WARN] Redis non connecte (cache desactive)')
     
     if test_minio_connection():
-        print('✅ MinIO connecté (stockage fichiers activé)')
+        _safe_print('[OK] MinIO connecte (stockage fichiers active)')
         initialize_buckets()  # Créer les buckets au démarrage
     else:
-        print('⚠️  MinIO non connecté (stockage fichiers désactivé)')
+        _safe_print('[WARN] MinIO non connecte (stockage fichiers desactive)')
 
 @app.get('/')
 def root():

@@ -1,22 +1,63 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/alerts_provider.dart';
+import '../providers/measurements_provider.dart';
+import '../utils/wound_status_helper.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/patient_list_tile.dart';
 import 'patient_detail_screen.dart';
 import 'devices_list_screen.dart';
+import 'patient_wound_status_screen.dart';
+import 'alerts_screen.dart';
 
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Rafraîchir les KPIs automatiquement (Total utilisateurs / Actifs / Alertes...).
+    // Important: sans invalidation périodique, FutureProvider ne se recharge pas.
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      ref.invalidate(dashboardStatsProvider);
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
     final user = authState.user;
+    // Médecin/admin : forMedecin = true (pas de graphe, détail impédance visible).
+    // Patient : forMedecin = false (graphe visible, détail impédance masqué).
+    final bool forMedecinScreen =
+        user != null && user.role.toLowerCase() != 'patient';
     final statsAsync = ref.watch(dashboardStatsProvider);
     final patientsAsync = ref.watch(patientsProvider);
+    final patientMeasurementsAsync = (user != null &&
+            user.role.toLowerCase() == 'patient')
+        ? ref.watch(patientMeasurementsProvider(user.id))
+        : null;
 
+    // Dashboard unifié:
+    // - patient: vue personnelle (device + état plaie),
+    // - admin/médecin: vue opérationnelle (utilisateurs, devices, alertes).
     return SingleChildScrollView(
       padding: EdgeInsets.only(
         left: MediaQuery.of(context).size.width > 600 ? 24.0 : 10.0,
@@ -39,7 +80,7 @@ class DashboardScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12), // Réduit à 12
 
-          // Statistiques
+          // Bloc statistiques (cards) adapté au rôle.
           statsAsync.when(
             data: (stats) {
               // Affichage différent selon le rôle
@@ -71,22 +112,10 @@ class DashboardScreen extends ConsumerWidget {
                           ? Colors.green
                           : Colors.orange,
                     ),
-                    StatCard(
-                      title: 'Batterie',
-                      value: '${stats['battery_level'] ?? 0}%',
-                      icon: Icons.battery_charging_full,
-                      color: Colors.blue,
-                    ),
-                    StatCard(
-                      title: 'Mes Mesures',
-                      value: '${stats['total_measurements'] ?? 0}',
-                      icon: Icons.analytics,
-                      color: Colors.purple,
-                    ),
                   ],
                 );
               } else {
-                // ADMIN et MÉDECIN : Afficher stats globales
+                // ADMIN/MÉDECIN : KPIs de supervision.
                 final screenWidth = MediaQuery.of(context).size.width;
                 final crossAxisCount =
                     screenWidth > 600 ? 2 : 2; // Toujours 2 colonnes sur mobile
@@ -101,26 +130,28 @@ class DashboardScreen extends ConsumerWidget {
                       0.75, // Ratio très bas pour beaucoup plus de hauteur
                   children: [
                     StatCard(
-                      title: 'Total Patients',
+                      title: 'Total Utilisateurs',
                       value: '${stats['total_patients'] ?? 0}',
                       icon: Icons.people,
                       color: Colors.blue,
                     ),
                     StatCard(
-                      title: 'Patients Actifs',
+                      title: 'Utilisateurs Actifs',
                       value: '${stats['active_patients'] ?? 0}',
                       icon: Icons.verified_user,
                       color: Colors.green,
                     ),
                     StatCard(
-                      title: 'Devices Actifs',
-                      value: '${stats['active_devices'] ?? 0}',
-                      icon: Icons.sensors,
-                      color: Colors.orange,
+                      title: 'Alertes',
+                      value: '${stats['alerts_unacknowledged'] ?? stats['alerts'] ?? 0}',
+                      icon: Icons.notifications_active,
+                      color: Colors.red,
                       onTap: () {
+                        ref.invalidate(alertsProvider);
+                        ref.invalidate(dashboardStatsProvider);
                         Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => const DevicesListScreen(),
+                            builder: (_) => const AlertsScreen(),
                           ),
                         );
                       },
@@ -156,12 +187,12 @@ class DashboardScreen extends ConsumerWidget {
 
           const SizedBox(height: 32),
 
-          // Liste des patients
+          // Deuxième bloc: liste utilisateurs/profil selon rôle.
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                user?.role == 'patient' ? 'Mon Profil' : 'Patients Récents',
+                user?.role == 'patient' ? 'Mon Profil' : 'Utilisateurs Récents',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -195,7 +226,7 @@ class DashboardScreen extends ConsumerWidget {
                         Text(
                           user?.role == 'patient'
                               ? 'Chargement...'
-                              : 'Aucun patient',
+                              : 'Aucun utilisateur',
                           style: TextStyle(
                             fontSize: 18,
                             color: Colors.grey[600],
@@ -207,51 +238,248 @@ class DashboardScreen extends ConsumerWidget {
                 );
               }
 
-              // PATIENT : Afficher son profil comme une card
-              if (user?.role == 'patient') {
-                final patient = patients.first;
-                return Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+              // PATIENT: card profil + accès à l'écran détaillé d'état de la plaie.
+              if (user != null && user.role.toLowerCase() == 'patient') {
+                // Utiliser l'utilisateur connecté directement si la liste est vide
+                final patient = patients.isNotEmpty
+                    ? patients.firstWhere(
+                        (p) => p.id == user.id,
+                        orElse: () => user,
+                      )
+                    : user;
+
+                return Column(
+                  children: [
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            CircleAvatar(
-                              radius: 32,
-                              backgroundColor: Theme.of(context).primaryColor,
-                              child: Text(
-                                patient.firstName[0].toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 24,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    patient.fullName,
+                            Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 32,
+                                  backgroundColor:
+                                      Theme.of(context).primaryColor,
+                                  child: Text(
+                                    patient.firstName.isNotEmpty
+                                        ? patient.firstName[0].toUpperCase()
+                                        : 'P',
                                     style: const TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                      fontSize: 24,
                                     ),
                                   ),
-                                  Text(patient.email),
-                                  if (patient.phone != null)
-                                    Text('📞 ${patient.phone}'),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        patient.fullName,
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(patient.email),
+                                      if (patient.phone != null &&
+                                          patient.phone!.isNotEmpty)
+                                        Text('📞 ${patient.phone}'),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    // Résumé d'état calculé localement à partir des mesures patient.
+                    if (patientMeasurementsAsync != null)
+                      patientMeasurementsAsync.when(
+                        data: (measurements) {
+                          final status = calculateWoundStatus(measurements);
+                          final displayLabel =
+                              getWoundStatusDisplayLabel(status);
+                          return Card(
+                            elevation: 2,
+                            child: InkWell(
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => PatientWoundStatusScreen(
+                                      patient: patient,
+                                      forMedecin: forMedecinScreen,
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: status.color.withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Icon(
+                                        status.icon,
+                                        color: status.color,
+                                        size: 32,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'État de ma plaie',
+                                            style: TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                              color: Theme.of(context)
+                                                  .primaryColor,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '$displayLabel ${status.emoji}',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: status.color,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.chevron_right,
+                                      color: Theme.of(context).primaryColor,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                        loading: () => Card(
+                          elevation: 2,
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => PatientWoundStatusScreen(
+                                    patient: patient,
+                                    forMedecin: forMedecinScreen,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.favorite,
+                                      color: Theme.of(context).primaryColor,
+                                      size: 32),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'État de ma plaie',
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                            color: Theme.of(context)
+                                                .primaryColor,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Chargement...',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(Icons.chevron_right,
+                                      color: Theme.of(context).primaryColor),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        error: (_, __) => Card(
+                          elevation: 2,
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => PatientWoundStatusScreen(
+                                    patient: patient,
+                                    forMedecin: forMedecinScreen,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.favorite,
+                                      color: Theme.of(context).primaryColor,
+                                      size: 32),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'État de ma plaie',
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                            color: Theme.of(context)
+                                                .primaryColor,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Voir mon état complet',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(Icons.chevron_right,
+                                      color: Theme.of(context).primaryColor),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 );
               }
 

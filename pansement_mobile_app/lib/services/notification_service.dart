@@ -3,7 +3,13 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/foundation.dart';
 import 'navigation_service.dart';
 
-/// Service pour gérer les notifications locales
+/// Service singleton pour les notifications locales.
+///
+/// Rôle:
+/// - initialiser le plugin de notifications,
+/// - créer le canal Android,
+/// - afficher/annuler les notifications,
+/// - router l'action "tap" vers la navigation applicative.
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
@@ -13,7 +19,8 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   bool _initialized = false;
 
-  /// Initialise le service de notifications
+  /// Initialise le service de notifications (idempotent).
+  /// Retourne `false` si les permissions sont refusées ou en cas d'erreur plugin.
   Future<bool> initialize() async {
     if (_initialized) return true;
 
@@ -65,7 +72,7 @@ class NotificationService {
     }
   }
 
-  /// Crée le canal de notification Android
+  /// Crée le canal Android principal utilisé par l'app.
   Future<void> _createNotificationChannel() async {
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
       'pansement_channel',
@@ -82,7 +89,8 @@ class NotificationService {
         ?.createNotificationChannel(channel);
   }
 
-  /// Affiche une notification
+  /// Affiche une notification locale immédiate.
+  /// Le `payload` est utilisé pour la navigation au tap.
   Future<void> showNotification({
     required int id,
     required String title,
@@ -125,7 +133,7 @@ class NotificationService {
     }
   }
 
-  /// Gère le tap sur une notification
+  /// Callback déclenché lors du tap utilisateur sur la notification.
   void _onNotificationTapped(NotificationResponse response) {
     debugPrint('🔔 Notification tapée: ${response.payload}');
     final navigationService = NavigationService();
@@ -142,7 +150,7 @@ class NotificationService {
     await _notifications.cancelAll();
   }
 
-  /// Vérifie si les notifications sont activées
+  /// Vérifie l'état global des notifications côté OS.
   Future<bool> areNotificationsEnabled() async {
     if (defaultTargetPlatform == TargetPlatform.android) {
       final androidImplementation =

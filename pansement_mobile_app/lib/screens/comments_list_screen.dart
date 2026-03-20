@@ -24,6 +24,8 @@ class CommentsListScreen extends ConsumerWidget {
 
     final commentsAsync = ref.watch(patientCommentsProvider(user.id));
 
+    // Vue patient des commentaires médicaux:
+    // chargement liste, badge non-lus, marquage "lu" au tap.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mes Commentaires'),
@@ -114,7 +116,7 @@ class CommentsListScreen extends ConsumerWidget {
                 return _CommentCard(
                   comment: comment,
                   onTap: () {
-                    // Marquer comme lu et ouvrir le détail
+                    // Le marquage lu est déclenché à l'ouverture du détail.
                     if (!comment.isRead) {
                       ref
                           .read(commentsNotifierProvider.notifier)

@@ -13,6 +13,7 @@ class MeasurementType(str, Enum):
     HUMIDITY = 'humidity'
     PH = 'ph'
     EXUDATE = 'exudate'
+    IMPEDANCE = 'impedance'  # Balayage Bode (impédance vs fréquence)
 
 # ============================================================================
 # Schémas de base
@@ -30,11 +31,24 @@ class MeasurementCreate(MeasurementBase):
     '''Schéma pour créer une mesure (depuis pansement BLE)'''
     pass
 
+
+class MeasurementCreateOpen(BaseModel):
+    '''Création mesure avec type libre (adc, s1, s2, impedance, etc.) pour éviter 422'''
+    device_id: str = Field(..., description='UUID du pansement')
+    measurement_type: str = Field(..., min_length=1, max_length=50, description='Type de mesure')
+    value: float = Field(..., description='Valeur mesurée')
+    unit: Optional[str] = Field(default='', max_length=20, description='Unité de mesure')
+    quality_score: Optional[float] = Field(None, ge=0, le=100)
+    patient_id: Optional[str] = Field(None, description='UUID du patient (optionnel)')
+    freq_hz: Optional[float] = Field(None, description='Fréquence en Hz (balayage Bode)')
+    phase_deg: Optional[float] = Field(None, description='Phase en degrés (balayage Bode)')
+
+
 class MeasurementResponse(BaseModel):
     '''Schéma de réponse avec toutes les infos'''
     id: str
     device_id: str
-    measurement_type: Optional[MeasurementType] = Field(None, description='Type de mesure (peut être None si valeur invalide)')
+    measurement_type: Optional[str] = Field(None, description='Type de mesure')
     value: float
     unit: str
     quality_score: Optional[float] = None
@@ -42,7 +56,9 @@ class MeasurementResponse(BaseModel):
     device_serial: Optional[str] = None
     patient_id: Optional[str] = None
     patient_name: Optional[str] = None
-    
+    freq_hz: Optional[float] = None
+    phase_deg: Optional[float] = None
+
     model_config = {'from_attributes': True}
 
 class MeasurementList(BaseModel):

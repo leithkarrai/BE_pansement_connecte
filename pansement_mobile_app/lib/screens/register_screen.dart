@@ -26,7 +26,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _acceptCGU = false;
-  String? _selectedRole = 'admin';
 
   @override
   void dispose() {
@@ -77,27 +76,25 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     }
 
     try {
-      // Appeler l'API d'inscription
+      // Le rôle final est inféré côté backend à partir des infos pro (si fournies).
       final apiService = ApiService();
+      // Important: initialiser ApiService (URL backend) avant la requête.
+      await apiService.initialize();
       await apiService.register(
         email: _emailController.text.trim(),
         password: _passwordController.text,
-        role: _selectedRole ?? 'patient',
         firstName: _firstNameController.text.trim(),
         lastName: _lastNameController.text.trim(),
         phone: _phoneController.text.trim().isNotEmpty
             ? _phoneController.text.trim()
             : null,
-        rppsNumber:
-            _selectedRole == 'medecin' && _rppsController.text.trim().isNotEmpty
-                ? _rppsController.text.trim()
-                : null,
-        specialty: _selectedRole == 'medecin' &&
-                _specialtyController.text.trim().isNotEmpty
+        rppsNumber: _rppsController.text.trim().isNotEmpty
+            ? _rppsController.text.trim()
+            : null,
+        specialty: _specialtyController.text.trim().isNotEmpty
             ? _specialtyController.text.trim()
             : null,
-        establishment: _selectedRole == 'medecin' &&
-                _establishmentController.text.trim().isNotEmpty
+        establishment: _establishmentController.text.trim().isNotEmpty
             ? _establishmentController.text.trim()
             : null,
       );
@@ -106,9 +103,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-                'Inscription réussie ! Vous pouvez maintenant vous connecter.'),
+                'Inscription réussie ! Votre compte sera validé par un administrateur.'),
             backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
+            duration: Duration(seconds: 4),
           ),
         );
         Navigator.of(context).pushReplacement(
@@ -147,6 +144,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Formulaire d'inscription unique patient/médecin:
+    // les champs professionnels restent optionnels.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Créer un compte'),
@@ -175,28 +174,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 32),
-
-              // Type de compte
-              DropdownButtonFormField<String>(
-                value: _selectedRole,
-                decoration: const InputDecoration(
-                  labelText: 'Type de compte',
-                  prefixIcon: Icon(Icons.person),
-                  border: OutlineInputBorder(),
-                ),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'admin', child: Text('Administrateur')),
-                  DropdownMenuItem(value: 'medecin', child: Text('Médecin')),
-                  DropdownMenuItem(value: 'patient', child: Text('Patient')),
-                ],
-                onChanged: (value) {
-                  setState(() {
-                    _selectedRole = value;
-                  });
-                },
-              ),
-              const SizedBox(height: 16),
 
               // Informations personnelles
               Text(
@@ -274,52 +251,57 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
               const SizedBox(height: 24),
 
-              // Informations professionnelles (si médecin)
-              if (_selectedRole == 'medecin') ...[
-                Text(
-                  'Informations professionnelles',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const SizedBox(height: 8),
+              // Informations professionnelles (optionnel - pour les médecins)
+              Text(
+                'Informations professionnelles (optionnel)',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Si vous êtes médecin, remplissez ces champs. Sinon, laissez-les vides.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey[600],
+                    ),
+              ),
+              const SizedBox(height: 8),
 
-                // Numéro RPPS
-                TextFormField(
-                  controller: _rppsController,
-                  decoration: const InputDecoration(
-                    labelText: 'Numéro RPPS',
-                    prefixIcon: Icon(Icons.badge),
-                    border: OutlineInputBorder(),
-                    helperText: '11 chiffres (ex: 12345678901)',
-                  ),
-                  keyboardType: TextInputType.number,
-                  maxLength: 11,
+              // Numéro RPPS
+              TextFormField(
+                controller: _rppsController,
+                decoration: const InputDecoration(
+                  labelText: 'Numéro RPPS (optionnel)',
+                  prefixIcon: Icon(Icons.badge),
+                  border: OutlineInputBorder(),
+                  helperText: '11 chiffres (ex: 12345678901)',
                 ),
-                const SizedBox(height: 16),
+                keyboardType: TextInputType.number,
+                maxLength: 11,
+              ),
+              const SizedBox(height: 16),
 
-                // Spécialité
-                TextFormField(
-                  controller: _specialtyController,
-                  decoration: const InputDecoration(
-                    labelText: 'Spécialité',
-                    prefixIcon: Icon(Icons.medical_services),
-                    border: OutlineInputBorder(),
-                  ),
+              // Spécialité
+              TextFormField(
+                controller: _specialtyController,
+                decoration: const InputDecoration(
+                  labelText: 'Spécialité (optionnel)',
+                  prefixIcon: Icon(Icons.medical_services),
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(height: 16),
+              ),
+              const SizedBox(height: 16),
 
-                // Établissement
-                TextFormField(
-                  controller: _establishmentController,
-                  decoration: const InputDecoration(
-                    labelText: 'Établissement',
-                    prefixIcon: Icon(Icons.business),
-                    border: OutlineInputBorder(),
-                  ),
+              // Établissement
+              TextFormField(
+                controller: _establishmentController,
+                decoration: const InputDecoration(
+                  labelText: 'Établissement (optionnel)',
+                  prefixIcon: Icon(Icons.business),
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(height: 24),
-              ],
+              ),
+              const SizedBox(height: 24),
 
               // Mot de passe
               Text(

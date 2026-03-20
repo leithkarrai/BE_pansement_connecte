@@ -1,4 +1,4 @@
-# 🐳 Guide : Démarrer le Backend avec Docker
+# Guide : Démarrer le Backend avec Docker
 
 ## Prérequis
 

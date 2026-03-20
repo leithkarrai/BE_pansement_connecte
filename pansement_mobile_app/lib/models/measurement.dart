@@ -8,6 +8,8 @@ class Measurement {
   final int? qualityScore;
   final DateTime timestamp;
   final String? patientName;
+  final double? freqHz;
+  final double? phaseDeg;
 
   Measurement({
     required this.id,
@@ -18,6 +20,8 @@ class Measurement {
     this.qualityScore,
     required this.timestamp,
     this.patientName,
+    this.freqHz,
+    this.phaseDeg,
   });
 
   factory Measurement.fromJson(Map<String, dynamic> json) {
@@ -38,19 +42,34 @@ class Measurement {
           ? DateTime.tryParse(json['timestamp'].toString()) ?? DateTime.now()
           : DateTime.now(),
       patientName: json['patient_name']?.toString(),
+      freqHz: _parseOptionalDoubleFromKeys(json, ['freq_hz', 'freqHz', 'freq']),
+      phaseDeg: _parseOptionalDoubleFromKeys(json, ['phase_deg', 'phaseDeg', 'phase']),
     );
+  }
+
+  /// Parse un double optionnel depuis le JSON (plusieurs clés possibles).
+  static double? _parseOptionalDoubleFromKeys(
+    Map<String, dynamic> json,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final v = json[key];
+      if (v == null) continue;
+      if (v is num) return v.toDouble();
+      final parsed = double.tryParse(v.toString());
+      if (parsed != null) return parsed;
+    }
+    return null;
   }
 
   String get typeLabel {
     switch (measurementType) {
+      case 'adc':
+        return 'Valeur ADC';
       case 'temperature':
         return 'Température';
-      case 'humidity':
-        return 'Humidité';
-      case 'ph':
-        return 'pH';
-      case 'exudate':
-        return 'Exsudat';
+      case 'impedance':
+        return 'Impédance';
       default:
         return measurementType;
     }

@@ -5,7 +5,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
 
 class HelpSupportScreen extends ConsumerWidget {
@@ -16,6 +15,7 @@ class HelpSupportScreen extends ConsumerWidget {
     final user = ref.watch(authProvider).user;
     final role = user?.role.toLowerCase() ?? 'patient';
 
+    // FAQ contextualisée par rôle pour réduire la friction utilisateur.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Aide et Support'),
@@ -26,100 +26,13 @@ class HelpSupportScreen extends ConsumerWidget {
           _buildSectionHeader(context, 'Questions fréquentes'),
           ..._getFAQQuestions(context, role),
 
-          // Guides
-          _buildSectionHeader(context, 'Guides'),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.play_circle_outline, color: Colors.blue),
-                  title: const Text('Tutoriel vidéo'),
-                  subtitle: Text(_getTutorialSubtitle(role)),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _showComingSoonDialog(context),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.book, color: Colors.green),
-                  title: const Text('Guide utilisateur'),
-                  subtitle: Text(_getGuideSubtitle(role)),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _showComingSoonDialog(context),
-                ),
-              ],
-            ),
-          ),
-
-          // Contact
-          _buildSectionHeader(context, 'Nous contacter'),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.email, color: Colors.blue),
-                  title: const Text('Email'),
-                  subtitle: const Text('support@pansement-connecte.fr'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _launchEmail(context),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.phone, color: Colors.green),
-                  title: const Text('Téléphone'),
-                  subtitle: const Text('+33 1 23 45 67 89'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _launchPhone(context),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.chat_bubble, color: Colors.orange),
-                  title: const Text('Chat en direct'),
-                  subtitle: const Text('Disponible 24/7'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _showComingSoonDialog(context),
-                ),
-              ],
-            ),
-          ),
-
-          // Informations système
-          _buildSectionHeader(context, 'Informations'),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Column(
-              children: [
-                const ListTile(
-                  leading: Icon(Icons.info_outline),
-                  title: Text('Version de l\'application'),
-                  trailing: Text('1.0.0', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.bug_report),
-                  title: const Text('Signaler un bug'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _showBugReportDialog(context),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.star),
-                  title: const Text('Noter l\'application'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _showComingSoonDialog(context),
-                ),
-              ],
-            ),
-          ),
-
           const SizedBox(height: 32),
         ],
       ),
     );
   }
 
-  /// Retourne les questions FAQ selon le rôle de l'utilisateur
+  /// Retourne le bloc FAQ adapté au rôle connecté.
   List<Widget> _getFAQQuestions(BuildContext context, String role) {
     switch (role) {
       case 'patient':
@@ -259,34 +172,6 @@ class HelpSupportScreen extends ConsumerWidget {
     ];
   }
 
-  /// Retourne le sous-titre du tutoriel selon le rôle
-  String _getTutorialSubtitle(String role) {
-    switch (role) {
-      case 'patient':
-        return 'Comment utiliser l\'application en tant que patient';
-      case 'medecin':
-        return 'Guide pour les médecins';
-      case 'admin':
-        return 'Guide d\'administration';
-      default:
-        return 'Comment utiliser l\'application';
-    }
-  }
-
-  /// Retourne le sous-titre du guide selon le rôle
-  String _getGuideSubtitle(String role) {
-    switch (role) {
-      case 'patient':
-        return 'Documentation patient (PDF)';
-      case 'medecin':
-        return 'Documentation médecin (PDF)';
-      case 'admin':
-        return 'Documentation administrateur (PDF)';
-      default:
-        return 'Documentation complète (PDF)';
-    }
-  }
-
   Widget _buildSectionHeader(BuildContext context, String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
@@ -324,127 +209,4 @@ class HelpSupportScreen extends ConsumerWidget {
     );
   }
 
-  void _showComingSoonDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Bientôt disponible'),
-        content: const Text('Cette fonctionnalité sera disponible dans une prochaine mise à jour.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _launchEmail(BuildContext context) async {
-    final Uri emailUri = Uri(
-      scheme: 'mailto',
-      path: 'support@pansement-connecte.fr',
-      query: 'subject=Demande de support',
-    );
-    
-    try {
-      if (await canLaunchUrl(emailUri)) {
-        await launchUrl(emailUri, mode: LaunchMode.externalApplication);
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-            const SnackBar(
-              content: Text('Impossible d\'ouvrir l\'application email'),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _launchPhone(BuildContext context) async {
-    final Uri phoneUri = Uri(
-      scheme: 'tel',
-      path: '+33123456789',
-    );
-    
-    try {
-      if (await canLaunchUrl(phoneUri)) {
-        await launchUrl(phoneUri, mode: LaunchMode.externalApplication);
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-            const SnackBar(
-              content: Text('Impossible d\'ouvrir l\'application téléphone'),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-          ),
-        );
-      }
-    }
-  }
-
-  void _showBugReportDialog(BuildContext context) {
-    final descriptionController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Signaler un bug'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Décrivez le problème rencontré :'),
-              const SizedBox(height: 8),
-              TextField(
-                controller: descriptionController,
-                maxLines: 5,
-                decoration: const InputDecoration(
-                  hintText: 'Ex: L\'application se ferme quand je clique sur...',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              // TODO: Envoyer le rapport de bug à l'API
-              Navigator.pop(context);
-              if (context.mounted) {
-                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                  const SnackBar(
-                    content: Text('Merci ! Votre rapport a été envoyé.'),
-                  ),
-                );
-              }
-            },
-            child: const Text('Envoyer'),
-          ),
-        ],
-      ),
-    );
-  }
 }

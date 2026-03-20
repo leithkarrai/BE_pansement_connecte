@@ -2,16 +2,28 @@ import 'package:flutter/material.dart';
 import '../screens/comments_list_screen.dart';
 import '../screens/alerts_screen.dart';
 
-/// Service global pour gérer la navigation depuis n'importe où dans l'app
-/// Utile pour la navigation depuis les notifications
+/// Service global de navigation.
+///
+/// Permet:
+/// - la navigation sans BuildContext direct (ex: callback de notification),
+/// - l'affichage global de SnackBars via une clé de ScaffoldMessenger.
 class NavigationService {
   static final NavigationService _instance = NavigationService._internal();
   factory NavigationService() => _instance;
   NavigationService._internal();
 
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  /// Clé pour afficher des SnackBars sans BuildContext (évite "deactivated widget's ancestor")
+  final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
 
-  /// Navigue vers un écran spécifique selon le payload de la notification
+  /// Affiche un SnackBar de manière sécurisée (sans BuildContext, évite "deactivated widget's ancestor")
+  void showSnackBar(SnackBar snackBar, {bool clearFirst = false}) {
+    if (clearFirst) scaffoldMessengerKey.currentState?.clearSnackBars();
+    scaffoldMessengerKey.currentState?.showSnackBar(snackBar);
+  }
+
+  /// Résout un payload de notification vers l'écran cible.
   void navigateFromNotification(String? payload) {
     if (payload == null || navigatorKey.currentContext == null) {
       return;
@@ -50,14 +62,14 @@ class NavigationService {
     }
   }
 
-  /// Navigue vers un écran avec des paramètres
+  /// Navigation nommée avec paramètres optionnels.
   void navigateTo(String route, {Object? arguments}) {
     if (navigatorKey.currentContext == null) return;
     Navigator.of(navigatorKey.currentContext!)
         .pushNamed(route, arguments: arguments);
   }
 
-  /// Retourne au précédent écran
+  /// Retour arrière si possible.
   void goBack() {
     if (navigatorKey.currentContext == null) return;
     Navigator.of(navigatorKey.currentContext!).pop();

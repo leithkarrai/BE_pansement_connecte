@@ -33,10 +33,14 @@ class Comment(Base):
     
     # Statut
     is_read = Column(Boolean, default=False, nullable=False, index=True)
+    # Masquage par rôle (suppression logique côté UI)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)  # patient
+    deleted_by_medecin_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_admin_at = Column(DateTime(timezone=True), nullable=True, index=True)
     
-    # Timestamps
+    # Timestamps (updated_at avec valeur par défaut pour éviter NOT NULL en base)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True)
     
     # Relations SQLAlchemy
     patient = relationship("User", foreign_keys=[patient_id], backref="comments_received")

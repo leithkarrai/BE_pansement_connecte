@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../services/ble_service.dart';
@@ -67,17 +68,36 @@ class BleScanNotifier extends StateNotifier<BleScanState> {
     ) {
       if (_isDisposed) return;
       if (adapterState == BluetoothAdapterState.off) {
-        try {
-          state =
-              state.copyWith(isScanning: false, error: 'Bluetooth désactivé');
-        } catch (e) {
-          // Ignorer les erreurs si le widget est désactivé
-          if (!_isDisposed) {
-            debugPrint("⚠️ Erreur mise à jour état (adapterState): $e");
-          }
-        }
+        _safeSetState(
+            state.copyWith(isScanning: false, error: 'Bluetooth désactivé'));
         _scanSubscription?.cancel();
       }
+    });
+  }
+
+  /// True si l'erreur est l'assertion de cycle de vie (widget disposé) — on ne la log pas.
+  static bool _isLifecycleAssertion(Object? error) {
+    final s = error.toString().toLowerCase();
+    return s.contains('defunct') ||
+        s.contains('_elementlifecycle') ||
+        s.contains('lifecyclestate') ||
+        s.contains('deactivated') ||
+        s.contains('ancestor');
+  }
+
+  /// Met à jour l'état après le prochain frame pour éviter les assertions
+  /// de cycle de vie quand un widget qui écoute est déjà disposé.
+  void _safeSetState(BleScanState newState) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_isDisposed) return;
+      runZonedGuarded(() {
+        if (_isDisposed) return;
+        state = newState;
+      }, (error, stackTrace) {
+        if (!_isDisposed && !_isLifecycleAssertion(error)) {
+          debugPrint("⚠️ Erreur mise à jour état scan: $error");
+        }
+      });
     });
   }
 
@@ -88,22 +108,24 @@ class BleScanNotifier extends StateNotifier<BleScanState> {
     try {
       // Vérifier si le Bluetooth est disponible
       if (!await _bleService.isBluetoothAvailable()) {
-        state = state.copyWith(
+        _safeSetState(state.copyWith(
           error: "Bluetooth non disponible. Veuillez l'activer.",
           isScanning: false,
-        );
+        ));
         return;
       }
 
       // Nettoyer le scan précédent
       await stopScan();
+      // Laisser le stack BLE se libérer avant de redémarrer (évite les échecs sur Android)
+      await Future<void>.delayed(const Duration(milliseconds: 400));
 
-      state = state.copyWith(isScanning: true, error: null, devices: []);
+      if (_isDisposed) return;
+      _safeSetState(state.copyWith(isScanning: true, error: null, devices: []));
 
       debugPrint("🔍 Démarrage du scan BLE...");
-
-      // Démarrer le scan
       await _bleService.startScan();
+      if (_isDisposed) return;
 
       // Écouter les résultats du scan
       _scanSubscription = FlutterBluePlus.scanResults.listen(
@@ -118,42 +140,26 @@ class BleScanNotifier extends StateNotifier<BleScanState> {
               "  - Device: ${name.isEmpty ? 'Sans nom' : name} (${result.device.remoteId})",
             );
           }
-
-          // TEMPORAIRE: Afficher TOUS les devices pour diagnostic
-          // TODO: Remettre le filtre une fois le device Zephyr identifié
-          final filteredResults = results.where((result) {
+          // Afficher tous les appareils BLE pour ne pas rater le pansement (nom ou UUID parfois absents au scan)
+          final filteredResults = List<ScanResult>.from(results);
+          for (var result in results) {
             final name = result.device.platformName.toLowerCase();
-
-            // Vérifier par nom
-            if (name.contains('pansement') || name.contains('pans')) {
+            final hasPans = name.contains('pansement') ||
+                name.contains('pensement') ||
+                name.contains('pans');
+            final hasNordic = name.contains('nordic') || name.contains('nrf');
+            final hasService =
+                result.advertisementData.serviceUuids.any((uuid) {
+              final u = uuid.toString().toLowerCase();
+              return u.contains('75c276c3') ||
+                  u.contains('76c276c3') ||
+                  u.contains('6e400001');
+            });
+            if (hasPans || hasNordic || hasService) {
               debugPrint(
-                "✅ Device trouvé par nom: ${result.device.remoteId}",
-              );
-              return true;
+                  "✅ Pansement/Nordic: ${result.device.remoteId} (${result.device.platformName})");
             }
-
-            // Vérifier par UUID de service dans les données d'advertising
-            if (result.advertisementData.serviceUuids.isNotEmpty) {
-              final hasOurService = result.advertisementData.serviceUuids.any(
-                (uuid) =>
-                    uuid.toString().toLowerCase() ==
-                    '75c276c3-8f97-20bc-a143-b354244886d4',
-              );
-              if (hasOurService) {
-                debugPrint(
-                  "✅ Device trouvé par UUID de service: ${result.device.remoteId}",
-                );
-                return true;
-              }
-            }
-
-            // TEMPORAIRE: Afficher TOUS les devices pour diagnostic
-            // Cela permet de voir tous les devices BLE et d'identifier le device Zephyr
-            debugPrint(
-              "🔍 Device affiché pour diagnostic: ${result.device.remoteId} (${name.isEmpty ? 'Sans nom' : name})",
-            );
-            return true; // Afficher tous les devices temporairement
-          }).toList();
+          }
 
           // Éviter les doublons en utilisant un Set basé sur l'adresse MAC
           final uniqueDevices = <String, ScanResult>{};
@@ -164,48 +170,49 @@ class BleScanNotifier extends StateNotifier<BleScanState> {
           // Vérifier à nouveau avant de mettre à jour l'état
           if (_isDisposed) return;
 
-          try {
-            state = state.copyWith(devices: uniqueDevices.values.toList());
-          } catch (e) {
-            // Ignorer les erreurs si le widget est désactivé
-            if (!_isDisposed) {
-              debugPrint("⚠️ Erreur mise à jour état scan: $e");
-            }
-            return;
-          }
+          final newDevicesList = uniqueDevices.values.toList();
+          final currentState = state;
+
+          // Reporter la mise à jour après le prochain frame pour éviter les assertions
+          // de cycle de vie (widget disposé) quand un écran quitte pendant le scan
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_isDisposed) return;
+            runZonedGuarded(() {
+              if (_isDisposed) return;
+              state = currentState.copyWith(devices: newDevicesList);
+            }, (error, stackTrace) {
+              if (!_isDisposed && !_isLifecycleAssertion(error)) {
+                debugPrint(
+                    "⚠️ Erreur mise à jour état scan (cycle de vie): $error");
+              }
+            });
+          });
 
           if (uniqueDevices.isNotEmpty) {
-            debugPrint("📡 ${uniqueDevices.length} pansement(s) détecté(s)");
+            debugPrint("📡 ${uniqueDevices.length} device(s) détecté(s)");
           } else if (results.isNotEmpty) {
             debugPrint(
-              "⚠️ Aucun device 'Pansement' trouvé parmi ${results.length} device(s)",
+              "⚠️ Aucun device ciblé (pansement / Nordic nRF) parmi ${results.length} device(s)",
             );
           }
         },
         onError: (error) {
           if (_isDisposed) return;
           debugPrint("❌ Erreur scan: $error");
-          try {
-            state = state.copyWith(isScanning: false, error: error.toString());
-          } catch (e) {
-            // Ignorer les erreurs si le widget est désactivé
-            if (!_isDisposed) {
-              debugPrint("⚠️ Erreur mise à jour état scan (onError): $e");
-            }
-          }
+          _safeSetState(
+              state.copyWith(isScanning: false, error: error.toString()));
         },
       );
     } catch (e) {
       if (_isDisposed) return;
       debugPrint("❌ Erreur démarrage scan: $e");
-      try {
-        state = state.copyWith(isScanning: false, error: e.toString());
-      } catch (stateError) {
-        // Ignorer les erreurs si le widget est désactivé
-        if (!_isDisposed) {
-          debugPrint("⚠️ Erreur mise à jour état scan (catch): $stateError");
-        }
-      }
+      final msg = e.toString().toLowerCase();
+      final friendly = msg.contains('location') || msg.contains('localisation')
+          ? 'Activez la localisation (requise pour le scan BLE sur Android).'
+          : msg.contains('permission') || msg.contains('bluetooth')
+              ? 'Vérifiez les autorisations : Bluetooth et localisation doivent être autorisés.'
+              : e.toString();
+      _safeSetState(state.copyWith(isScanning: false, error: friendly));
     }
   }
 
@@ -219,9 +226,7 @@ class BleScanNotifier extends StateNotifier<BleScanState> {
         await FlutterBluePlus.stopScan();
       }
 
-      if (!_isDisposed) {
-        state = state.copyWith(isScanning: false);
-      }
+      _safeSetState(state.copyWith(isScanning: false));
       debugPrint("⏹️ Scan arrêté");
     } catch (e) {
       debugPrint("❌ Erreur arrêt scan: $e");
@@ -263,6 +268,8 @@ class DeviceConnectionState {
   final bool isConnected;
   final bool isReading;
   final Map<String, dynamic>? measurements;
+  /// Points du balayage (freq, impedance, phase) pour courbe Bode et envoi serveur
+  final List<Map<String, dynamic>> sweepPoints;
   final String? error;
 
   DeviceConnectionState({
@@ -270,6 +277,7 @@ class DeviceConnectionState {
     this.isConnected = false,
     this.isReading = false,
     this.measurements,
+    this.sweepPoints = const [],
     this.error,
   });
 
@@ -278,13 +286,16 @@ class DeviceConnectionState {
     bool? isConnected,
     bool? isReading,
     Map<String, dynamic>? measurements,
+    List<Map<String, dynamic>>? sweepPoints,
     String? error,
+    bool clearMeasurements = false,
   }) {
     return DeviceConnectionState(
       isConnecting: isConnecting ?? this.isConnecting,
       isConnected: isConnected ?? this.isConnected,
       isReading: isReading ?? this.isReading,
-      measurements: measurements ?? this.measurements,
+      measurements: clearMeasurements ? null : (measurements ?? this.measurements),
+      sweepPoints: sweepPoints ?? this.sweepPoints,
       error: error,
     );
   }
@@ -294,6 +305,7 @@ class DeviceConnectionNotifier extends StateNotifier<DeviceConnectionState> {
   final BluetoothDevice device;
   final BleService bleService;
   bool _isDisposed = false;
+  int _connectRetryCount = 0;
 
   DeviceConnectionNotifier(this.device, this.bleService)
       : super(DeviceConnectionState()) {
@@ -307,91 +319,172 @@ class DeviceConnectionNotifier extends StateNotifier<DeviceConnectionState> {
     bleService.onConnectionStateChanged = _handleConnectionStateChanged;
   }
 
-  /// Connecte au device
+  /// Connecte au device (avec 1 tentative automatique si déconnexion pendant setNotifyValue).
   Future<void> connect() async {
     if (_isDisposed) return;
 
-    try {
-      state = state.copyWith(isConnecting: true, error: null);
-    } catch (e) {
-      if (!_isDisposed) {
-        debugPrint("⚠️ Erreur mise à jour état (connect init): $e");
-      }
-      return;
-    }
+    _safeSetState(state.copyWith(isConnecting: true, error: null));
 
     try {
-      final success = await bleService.connectToDevice(device);
-
-      if (!_isDisposed) {
-        try {
-          if (success) {
-            state = state.copyWith(isConnecting: false, isConnected: true);
-            // Lire automatiquement les mesures après connexion
-            await readMeasurements();
-          } else {
-            state = state.copyWith(
-              isConnecting: false,
-              isConnected: false,
-              error: "Échec de la connexion",
-            );
-          }
-        } catch (e) {
-          if (!_isDisposed) {
-            debugPrint("⚠️ Erreur mise à jour état (connect success): $e");
-          }
-        }
-      }
-    } catch (e) {
-      if (!_isDisposed) {
-        try {
-          state = state.copyWith(
-            isConnecting: false,
-            isConnected: false,
-            error: e.toString(),
+      const connectionTimeout = Duration(seconds: 35);
+      final (success, errorMsg) =
+          await bleService.connectToDevice(device).timeout(
+        connectionTimeout,
+        onTimeout: () async {
+          try {
+            await bleService.disconnectDevice(device);
+          } catch (_) {}
+          return (
+            false,
+            'La connexion prend trop de temps. Rapprochez le pansement et appuyez sur « Réessayer la connexion ».'
           );
-        } catch (stateError) {
-          debugPrint("⚠️ Erreur mise à jour état (connect error): $stateError");
+        },
+      );
+
+      if (_isDisposed) return;
+      if (success) {
+        _connectRetryCount = 0;
+        bleService.clearSweepPoints();
+        _safeSetState(state.copyWith(
+          isConnecting: false,
+          isConnected: true,
+          sweepPoints: [],
+          clearMeasurements: true,
+          error: null,
+        ));
+        // Lancer la collecte automatique en arrière-plan (ne pas bloquer l'UI)
+        Future<void>.delayed(Duration.zero, () => readMeasurements());
+      } else {
+        _safeSetState(state.copyWith(
+          isConnecting: false,
+          isConnected: false,
+          error: errorMsg ?? state.error,
+        ));
+        if (!_isDisposed && _connectRetryCount < 1) {
+          _connectRetryCount++;
+          debugPrint("🔄 [BLE] Reconnexion automatique dans 2s...");
+          await Future<void>.delayed(const Duration(seconds: 2));
+          if (!_isDisposed) await connect();
         }
       }
+    } catch (e) {
+      if (_isDisposed) return;
+      _safeSetState(state.copyWith(
+        isConnecting: false,
+        isConnected: false,
+        error: e.toString(),
+      ));
     }
   }
 
-  /// Lit les mesures manuellement
-  Future<void> readMeasurements() async {
-    if (_isDisposed || !state.isConnected) return;
+  /// Met à jour l'état après le prochain frame ; les erreurs de cycle de vie (widget disposé) sont absorbées.
+  void _safeSetState(DeviceConnectionState newState) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_isDisposed) return;
+      runZonedGuarded(() {
+        if (_isDisposed) return;
+        state = newState;
+      }, (error, _) {
+        // Ne pas logger les assertions de cycle de vie (widget disposé / deactivated ancestor)
+        final msg = error.toString().toLowerCase();
+        final isLifecycleError = error is AssertionError ||
+            msg.contains('defunct') ||
+            (msg.contains('ref') && msg.contains('disposed')) ||
+            msg.contains('deactivated') ||
+            msg.contains('ancestor');
+        if (!_isDisposed && !isLifecycleError) {
+          debugPrint("⚠️ _safeSetState: $error");
+        }
+      });
+    });
+  }
+
+  /// Lit les mesures.
+  /// [forceRead] false = "Démarrer la collecte" : on n'envoie PAS de read BLE (évite la déconnexion),
+  ///   on attend les données déjà reçues par notification.
+  /// [forceRead] true = "Rafraîchir" : on tente un read() BLE.
+  Future<void> readMeasurements({bool forceRead = false}) async {
+    if (_isDisposed) return;
+
+    // Effacer l'erreur avant de lancer la collecte pour ne pas afficher un ancien "Connexion perdue"
+    final loadingState = state.copyWith(isReading: true, error: null);
+    _safeSetState(loadingState);
 
     try {
-      state = state.copyWith(isReading: true, error: null);
-    } catch (e) {
-      if (!_isDisposed) {
-        debugPrint("⚠️ Erreur mise à jour état (readMeasurements init): $e");
-      }
-      return;
-    }
+      Map<String, dynamic>? measurements;
 
-    try {
-      final measurements = await bleService.readMeasurements(device);
-
-      if (!_isDisposed) {
-        try {
-          state = state.copyWith(isReading: false, measurements: measurements);
-        } catch (e) {
-          if (!_isDisposed) {
-            debugPrint(
-                "⚠️ Erreur mise à jour état (readMeasurements success): $e");
+      if (forceRead) {
+        measurements = await bleService.readMeasurements(
+          device,
+          forceTryRead: true,
+        );
+        if (_isDisposed) return;
+        if (measurements == null) {
+          measurements = bleService.getLastMeasurements();
+        }
+      } else {
+        // "Démarrer la collecte" : attendre UNIQUEMENT les notifications (pas de read BLE).
+        // Un read() sur ce pansement provoque souvent une déconnexion (caractéristique en notification seule).
+        // Attendre jusqu'à ~25 s pour laisser le temps d'appuyer sur le bouton nRF puis de lancer la collecte.
+        for (int i = 0; i < 25; i++) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          if (_isDisposed) return;
+          final last = bleService.getLastMeasurements();
+          if (last != null) {
+            measurements = last;
+            break;
           }
         }
+        if (_isDisposed) return;
+        measurements ??= bleService.getLastMeasurements();
       }
+
+      // En collecte automatique (forceRead: false), ne pas afficher d'erreur si pas de données :
+      // rester en "En attente" ; les données s'afficheront dès réception (callback).
+      final String? errorMsg = measurements != null
+          ? null
+          : (forceRead
+              ? (state.error ??
+                  'Aucune donnée reçue. Le pansement envoie les données automatiquement ; gardez l\'app ouverte et rapprochez le capteur.')
+              : null);
+      // Ne jamais marquer "déconnecté" ici : seul le callback _handleConnectionStateChanged
+      // doit mettre isConnected à false. Sinon un ancien message d'erreur ou l'absence de
+      // données fait afficher "déconnecté" alors que le BLE est encore connecté.
+      _safeSetState(state.copyWith(
+        isReading: false,
+        measurements: measurements,
+        error: errorMsg,
+        isConnected: state.isConnected,
+      ));
     } catch (e) {
-      if (!_isDisposed) {
-        try {
-          state = state.copyWith(isReading: false, error: e.toString());
-        } catch (stateError) {
-          debugPrint(
-              "⚠️ Erreur mise à jour état (readMeasurements error): $stateError");
-        }
-      }
+      if (_isDisposed) return;
+      final msg = e.toString().toLowerCase();
+      final friendly = msg.contains('caractéristique') ||
+              msg.contains('non initialisée') ||
+              msg.contains('disconnected') ||
+              msg.contains('device is disconnected') ||
+              msg.contains('gatt') ||
+              msg.contains('aucune donnée') ||
+              msg.contains('exception')
+          ? 'Connexion perdue ou capteur non prêt. Rapprochez le pansement et réessayez.'
+          : e.toString();
+      _safeSetState(state.copyWith(isReading: false, error: friendly));
+    }
+  }
+
+  /// Efface le message d'erreur affiché (ex. avant de réessayer la connexion).
+  void clearError() {
+    if (_isDisposed) return;
+    _safeSetState(state.copyWith(error: null));
+  }
+
+  /// Réessaie d'activer les notifications BLE (utile après un timeout au premier essai).
+  Future<void> retryNotifications() async {
+    if (_isDisposed) return;
+    final ok = await bleService.retryEnableNotifications();
+    if (_isDisposed) return;
+    if (ok) {
+      _safeSetState(state.copyWith(error: null));
     }
   }
 
@@ -409,50 +502,42 @@ class DeviceConnectionNotifier extends StateNotifier<DeviceConnectionState> {
     }
   }
 
-  /// Callback quand des données sont reçues
+  /// Callback quand des données sont reçues (notifications BLE)
   void _handleDataReceived(Map<String, dynamic> data) {
     if (_isDisposed) return;
-    try {
-      state = state.copyWith(measurements: data);
-    } catch (e) {
-      // Ignorer les erreurs si le widget est désactivé
-      if (!_isDisposed) {
-        debugPrint("⚠️ Erreur mise à jour état (dataReceived): $e");
-      }
+
+    debugPrint("📊 DATA RECUE: $data");
+
+    // Stocker directement chaque point Bode dans sweepPoints (état du provider)
+    final newSweepPoints = List<Map<String, dynamic>>.from(state.sweepPoints);
+    if (data.containsKey('freq') && data.containsKey('impedance')) {
+      newSweepPoints.add(data);
+      debugPrint("📈 SWEEPPOINT AJOUTÉ → total: ${newSweepPoints.length}");
     }
+
+    _safeSetState(state.copyWith(
+      measurements: data,
+      sweepPoints: newSweepPoints,
+      error: null,
+    ));
   }
 
   /// Callback en cas d'erreur
   void _handleError(String error) {
     if (_isDisposed) return;
-    try {
-      state = state.copyWith(error: error);
-    } catch (e) {
-      // Ignorer les erreurs si le widget est désactivé
-      if (!_isDisposed) {
-        debugPrint("⚠️ Erreur mise à jour état (error): $e");
-      }
-    }
+    _safeSetState(state.copyWith(error: error));
   }
 
   /// Callback quand l'état de connexion change
   void _handleConnectionStateChanged(BluetoothConnectionState connectionState) {
     if (_isDisposed) return;
-
     final isConnected = connectionState == BluetoothConnectionState.connected;
-
-    try {
-      state = state.copyWith(
-        isConnected: isConnected,
-        // Si déconnecté, réinitialiser l'état
-        measurements: isConnected ? state.measurements : null,
-      );
-    } catch (e) {
-      // Ignorer les erreurs si le widget est désactivé
-      if (!_isDisposed) {
-        debugPrint("⚠️ Erreur mise à jour état (connectionStateChanged): $e");
-      }
-    }
+    _safeSetState(state.copyWith(
+      isConnecting: isConnected ? false : state.isConnecting,
+      isConnected: isConnected,
+      measurements: isConnected ? state.measurements : null,
+      sweepPoints: isConnected ? state.sweepPoints : [],
+    ));
   }
 
   @override

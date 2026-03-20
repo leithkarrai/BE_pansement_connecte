@@ -43,6 +43,10 @@ def upload_photo(
     - Admin: Peut uploader pour n'importe quel patient
     - Médecin: Peut uploader pour ses patients
     - Patient: Peut uploader uniquement pour lui-même
+
+    Convention de stockage:
+    - object_name est préfixé par `{patient_id}/...` pour simplifier les contrôles d'accès
+      sur download/delete.
     """
     # Vérifier les permissions
     if patient_id:
@@ -77,7 +81,8 @@ def upload_photo(
         # Si pas de patient_id, utiliser l'utilisateur connecté
         patient_id = str(current_user.id)
     
-    # Vérifier le type de fichier
+    # Vérifier le type de fichier (MVP: contrôle MIME uniquement).
+    # En production, ajouter une validation plus stricte du contenu binaire.
     if not file.content_type or not file.content_type.startswith('image/'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -133,7 +138,11 @@ def upload_avatar(
     """
     Uploader une photo de profil.
     
-    Permissions: Tous les utilisateurs peuvent uploader leur propre avatar
+    Permissions: Tous les utilisateurs peuvent uploader leur propre avatar.
+
+    Notes:
+    - La taille est limitée à 5MB pour éviter les uploads excessifs.
+    - L'URL MinIO est persistée dans `users.profile_photo_url`.
     """
     # Vérifier le type de fichier
     if not file.content_type or not file.content_type.startswith('image/'):
@@ -209,6 +218,10 @@ def download_file_route(
     - Admin: Peut télécharger n'importe quel fichier
     - Médecin: Peut télécharger les fichiers de ses patients
     - Patient: Peut télécharger uniquement ses propres fichiers
+
+    Règle d'autorisation:
+    - le propriétaire est déduit du préfixe `object_name` (`{owner_id}/filename`).
+    - pour un médecin, l'accès est conditionné par la relation `medecin_patients`.
     """
     # Vérifier que le bucket est autorisé
     allowed_buckets = [BUCKET_PHOTOS, BUCKET_DOCUMENTS, BUCKET_AVATARS]
@@ -295,7 +308,10 @@ def delete_file_route(
     """
     Supprimer un fichier depuis MinIO.
     
-    Permissions: Admin uniquement
+    Permissions: Admin uniquement.
+
+    Note:
+    - suppression physique dans MinIO (contrairement à d'autres ressources backend en soft-delete).
     """
     # Vérifier que le bucket est autorisé
     allowed_buckets = [BUCKET_PHOTOS, BUCKET_DOCUMENTS, BUCKET_AVATARS]

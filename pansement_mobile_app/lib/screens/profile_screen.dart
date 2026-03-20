@@ -5,7 +5,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
@@ -24,6 +23,8 @@ class ProfileScreen extends ConsumerWidget {
       );
     }
 
+    // Ecran profil "hub":
+    // infos utilisateur + accès paramètres/sécurité/aide + logout.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profil'),
@@ -112,7 +113,7 @@ class ProfileScreen extends ConsumerWidget {
 
           const SizedBox(height: 16),
 
-          // Paramètres et actions
+          // Raccourcis de navigation vers les écrans de configuration.
           Card(
             child: Column(
               children: [
@@ -135,7 +136,6 @@ class ProfileScreen extends ConsumerWidget {
                   title: const Text('Notifications'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    // Navigation vers les paramètres de notifications
                     Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -150,7 +150,7 @@ class ProfileScreen extends ConsumerWidget {
                   title: const Text('Sécurité et confidentialité'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    _showSecurityDialog(context);
+                    _showSecurityDialog(context, ref);
                   },
                 ),
                 const Divider(height: 1),
@@ -290,7 +290,11 @@ class ProfileScreen extends ConsumerWidget {
     return '${date.day} ${months[date.month - 1]} ${date.year}';
   }
 
-  void _showSecurityDialog(BuildContext context) {
+  void _showSecurityDialog(BuildContext context, WidgetRef ref) {
+    final user = ref.read(authProvider).user;
+    final role = user?.role.toLowerCase() ?? '';
+    final isPatient = role == 'patient';
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -311,55 +315,14 @@ class ProfileScreen extends ConsumerWidget {
                 'Nous respectons le règlement européen sur la protection des données.',
                 Icons.verified_user,
               ),
-              const SizedBox(height: 16),
-              _buildSecurityItem(
-                'Données médicales',
-                'Vos données de santé sont protégées selon les normes médicales.',
-                Icons.health_and_safety,
-              ),
-              const SizedBox(height: 24),
-              TextButton(
-                onPressed: () async {
-                  Navigator.pop(context);
-                  // URL de la politique de confidentialité (à remplacer par votre vraie URL)
-                  const url = 'https://example.com/privacy-policy';
-                  final uri = Uri.parse(url);
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  } else {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                              'Impossible d\'ouvrir la politique de confidentialité'),
-                        ),
-                      );
-                    }
-                  }
-                },
-                child: const Text('Lire la politique de confidentialité'),
-              ),
-              TextButton(
-                onPressed: () async {
-                  Navigator.pop(context);
-                  // URL des CGU (à remplacer par votre vraie URL)
-                  const url = 'https://example.com/terms-of-service';
-                  final uri = Uri.parse(url);
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  } else {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Impossible d\'ouvrir les CGU'),
-                        ),
-                      );
-                    }
-                  }
-                },
-                child:
-                    const Text('Lire les conditions générales d\'utilisation'),
-              ),
+              if (isPatient) ...[
+                const SizedBox(height: 16),
+                _buildSecurityItem(
+                  'Données médicales',
+                  'Vos données de santé sont protégées selon les normes médicales.',
+                  Icons.health_and_safety,
+                ),
+              ],
             ],
           ),
         ),
@@ -418,7 +381,6 @@ class ProfileScreen extends ConsumerWidget {
           ),
           ElevatedButton(
             onPressed: () async {
-              // Déconnexion
               await ref.read(authProvider.notifier).logout();
 
               if (context.mounted) {

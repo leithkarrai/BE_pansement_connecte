@@ -1,8 +1,10 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, text
 from typing import Optional
 from uuid import UUID
+import uuid
 
 from app.database import get_db
 from app.schemas.comment import (
@@ -30,7 +32,11 @@ def get_patient_comments(
     
     - **patient_id**: UUID du patient
     
-    Accessible par : Patient (ses propres commentaires), Médecin (ses patients), Admin (tous)
+    Accessible par : Patient (ses propres commentaires), Médecin (ses patients), Admin (tous).
+
+    Règle métier importante:
+    - Le médecin assigné ne voit que ses propres commentaires pour ce patient.
+      Les commentaires rédigés par un admin restent invisibles pour lui.
     """
     # Vérification des permissions
     try:
@@ -60,10 +66,18 @@ def get_patient_comments(
                 detail="Ce patient ne vous est pas assigné"
             )
     
-    # Récupérer les commentaires avec les infos du médecin
-    comments = db.query(Comment).filter(
-        Comment.patient_id == patient_uuid
-    ).order_by(desc(Comment.created_at)).all()
+    # Récupérer les commentaires.
+    # L'auteur est stocké dans `Comment.medecin_id` (médecin OU admin).
+    # Pour un médecin, on force un filtrage par auteur == current_user.
+    query = db.query(Comment).filter(Comment.patient_id == patient_uuid)
+    if current_user.role == "medecin":
+        query = query.filter(Comment.medecin_id == current_user.id)
+        # Masquage local médecin: la suppression d'un médecin ne doit pas impacter le patient.
+        query = query.filter(Comment.deleted_by_medecin_at.is_(None))
+    elif current_user.role == "admin":
+        # Masquage local admin: la suppression d'un admin ne doit pas impacter le patient.
+        query = query.filter(Comment.deleted_by_admin_at.is_(None))
+    comments = query.order_by(desc(Comment.created_at)).all()
     
     # Enrichir avec le nom du médecin
     comments_data = []
@@ -144,7 +158,12 @@ def create_comment(
     """
     Créer un nouveau commentaire pour un patient.
     
-    Accessible par : Médecin, Admin
+    Accessible par : Médecin, Admin.
+
+    Notes de sécurité/métier:
+    - médecin: autorisé uniquement sur ses patients assignés,
+    - admin: autorisé globalement,
+    - l'auteur est enregistré dans `medecin_id` (médecin OU admin).
     """
     # Vérifier que l'utilisateur est médecin ou admin
     if current_user.role not in ["medecin", "admin"]:
@@ -201,37 +220,62 @@ def create_comment(
             detail="Patient non trouvé"
         )
     
-    # Créer le commentaire
-    new_comment = Comment(
-        patient_id=patient_uuid,
-        medecin_id=current_user.id,
-        comment_text=comment_data.comment_text.strip(),
-        measurement_id=UUID(comment_data.measurement_id) if comment_data.measurement_id else None,
-        is_read=False
+    # Créer le commentaire via INSERT SQL explicite.
+    # Pourquoi du SQL brut ici ?
+    # - la base impose updated_at NOT NULL (et certains environnements n'appliquaient
+    #   pas correctement la valeur côté ORM),
+    # - CAST(:param AS uuid) évite les erreurs de syntaxe/typage PostgreSQL.
+    comment_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    comment_text_clean = comment_data.comment_text.strip()
+    # measurement_id est optionnel; quand présent on valide son format UUID.
+    measurement_uuid = UUID(comment_data.measurement_id) if comment_data.measurement_id else None
+
+    db.execute(
+        text("""
+            INSERT INTO comments (id, patient_id, medecin_id, measurement_id, comment_text, is_read, created_at, updated_at)
+            VALUES (
+                CAST(:id AS uuid),
+                CAST(:patient_id AS uuid),
+                CAST(:medecin_id AS uuid),
+                CAST(:measurement_id AS uuid),
+                :comment_text,
+                :is_read,
+                :created_at,
+                :updated_at
+            )
+        """),
+        {
+            "id": str(comment_id),
+            "patient_id": str(patient_uuid),
+            "medecin_id": str(current_user.id),
+            "measurement_id": str(measurement_uuid) if measurement_uuid else None,
+            "comment_text": comment_text_clean,
+            "is_read": False,
+            "created_at": now,
+            "updated_at": now,
+        },
     )
-    
-    db.add(new_comment)
     db.commit()
-    db.refresh(new_comment)
-    
+
     # Récupérer le nom du médecin
     medecin = db.query(User).filter(User.id == current_user.id).first()
     medecin_name = f"{medecin.first_name} {medecin.last_name}" if medecin else "Inconnu"
-    
+
     # TODO: Envoyer une notification push au patient
-    
+
     return {
         "success": True,
         "comment": {
-            "id": str(new_comment.id),
-            "patient_id": str(new_comment.patient_id),
-            "medecin_id": str(new_comment.medecin_id),
+            "id": str(comment_id),
+            "patient_id": str(patient_uuid),
+            "medecin_id": str(current_user.id),
             "medecin_name": medecin_name,
-            "comment_text": new_comment.comment_text,
-            "is_read": new_comment.is_read,
-            "measurement_id": str(new_comment.measurement_id) if new_comment.measurement_id else None,
-            "created_at": new_comment.created_at.isoformat(),
-            "updated_at": new_comment.updated_at.isoformat() if new_comment.updated_at else new_comment.created_at.isoformat()
+            "comment_text": comment_text_clean,
+            "is_read": False,
+            "measurement_id": str(measurement_uuid) if measurement_uuid else None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
         },
         "message": "Commentaire créé avec succès"
     }
@@ -251,7 +295,11 @@ def update_comment(
     """
     Modifier un commentaire existant.
     
-    Accessible par : Médecin (son propre commentaire), Admin
+    Accessible par : Médecin (son propre commentaire), Admin.
+
+    Règle:
+    - un médecin ne peut modifier que ses propres commentaires.
+    - un admin peut modifier tous les commentaires.
     """
     # Vérifier que l'utilisateur est médecin ou admin
     if current_user.role not in ["medecin", "admin"]:
@@ -353,13 +401,17 @@ def delete_comment(
             detail="Vous ne pouvez supprimer que vos propres commentaires"
         )
     
-    # Supprimer
-    db.delete(comment)
+    # Suppression logique par rôle (ne pas supprimer la ligne pour le patient).
+    now = datetime.now(timezone.utc)
+    if current_user.role == "medecin":
+        comment.deleted_by_medecin_at = now
+    else:  # admin
+        comment.deleted_by_admin_at = now
     db.commit()
     
     return {
         "success": True,
-        "message": "Commentaire supprimé"
+        "message": "Commentaire masqué pour votre rôle"
     }
 
 # ============================================================================

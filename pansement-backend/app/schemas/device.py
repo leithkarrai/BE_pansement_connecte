@@ -12,6 +12,7 @@ class DeviceStatus(str, Enum):
     ACTIVE = 'active'           # Pansement actif / en utilisation
     INACTIVE = 'inactive'       # Pansement inactif / disponible
     MAINTENANCE = 'maintenance' # En maintenance
+    RETIRED = 'retired'         # Pansement retiré (aligné avec app.models.device)
 
 # ============================================================================
 # Schémas de base
@@ -46,9 +47,17 @@ class DeviceUpdate(BaseModel):
     status: Optional[DeviceStatus] = None
     last_calibration_date: Optional[datetime] = None
 
+class RegisterByMacRequest(BaseModel):
+    '''Enregistrer un pansement par adresse MAC (app patient)'''
+    mac_address: str = Field(..., description='Adresse MAC BLE (ex: E8:AD:59:A7:7B:E1)')
+
 class DeviceAssign(BaseModel):
     '''Schéma pour assigner un device à un patient'''
     patient_id: str = Field(..., description='UUID du patient')
+
+class DeviceAssignToMe(BaseModel):
+    '''Schéma pour qu\'un patient s\'assigner un device (lui-même)'''
+    device_id: str = Field(..., description='UUID du device à s\'assigner')
 
 class DeviceResponse(DeviceBase):
     '''Schéma de réponse avec toutes les infos'''

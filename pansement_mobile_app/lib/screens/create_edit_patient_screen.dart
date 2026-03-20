@@ -76,7 +76,7 @@ class _CreateEditPatientScreenState
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // En mode création, le mot de passe est requis
+    // Règle: en création, le mot de passe est obligatoire.
     if (widget.patient == null && _passwordController.text.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -103,7 +103,7 @@ class _CreateEditPatientScreenState
       }
 
       if (widget.patient == null) {
-        // Création
+        // Mode création patient (admin uniquement).
         await apiService.createUser(
           email: _emailController.text.trim(),
           password: _passwordController.text,
@@ -132,7 +132,7 @@ class _CreateEditPatientScreenState
           Navigator.pop(context, true); // Retour avec succès
         }
       } else {
-        // Édition
+        // Mode édition patient existant.
         await apiService.updateUser(
           userId: widget.patient!.id,
           email: _emailController.text.trim(),
@@ -186,6 +186,7 @@ class _CreateEditPatientScreenState
   Widget build(BuildContext context) {
     final isEditMode = widget.patient != null;
 
+    // Ecran unifié création/édition patient.
     return Scaffold(
       appBar: AppBar(
         title: Text(isEditMode ? 'Modifier le patient' : 'Nouveau patient'),
