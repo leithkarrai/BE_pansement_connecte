@@ -437,6 +437,21 @@ class DeviceConnectionNotifier extends StateNotifier<DeviceConnectionState> {
         }
         if (_isDisposed) return;
         measurements ??= bleService.getLastMeasurements();
+
+        // Fallback auto : si rien n'est arrivé via notifications, tenter UNE lecture BLE.
+        // Cela aide les firmwares qui n'émettent pas spontanément tant qu'un read n'est pas fait.
+        if (measurements == null) {
+          try {
+            final fallback = await bleService.readMeasurements(
+              device,
+              forceTryRead: true,
+            );
+            if (_isDisposed) return;
+            measurements = fallback ?? bleService.getLastMeasurements();
+          } catch (_) {
+            // On reste silencieux ici: le flux notifications peut démarrer un peu plus tard.
+          }
+        }
       }
 
       // En collecte automatique (forceRead: false), ne pas afficher d'erreur si pas de données :

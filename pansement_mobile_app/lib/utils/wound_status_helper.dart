@@ -22,7 +22,8 @@ class WoundStatusResult {
   final IconData icon;
   final String emoji;
   final DateTime? lastUpdate;
-  final Map<String, double?>? bandRatios; // low / mid / high
+  /// low / mid / high (+ mean = moyenne des R utilisée pour l'état global)
+  final Map<String, double?>? bandRatios;
 
   WoundStatusResult({
     required this.label,
@@ -49,6 +50,7 @@ enum _BandState {
   infected,
 }
 
+/// Classe un ratio R = Zplaie / Zsaine (ou la moyenne de plusieurs R) selon les seuils.
 _BandState _classifyRatio(double ratio) {
   // Plaie infectée d'abord (seuil plus sévère), puis plaie.
   if (ratio > 1.20 || ratio < 0.80) return _BandState.infected;
@@ -104,50 +106,61 @@ WoundStatusResult? _calculateFromImpedance(List<Measurement> measurements) {
   final midRatio = midMean != null ? midMean / _zSaineMoyenne : null;
   final highRatio = highMean != null ? highMean / _zSaineHaute : null;
 
-  final states = <_BandState>[
-    if (lowRatio != null) _classifyRatio(lowRatio),
-    if (midRatio != null) _classifyRatio(midRatio),
-    if (highRatio != null) _classifyRatio(highRatio),
+  // Agrégation globale : moyenne des R sur les bandes où l'on a des mesures,
+  // puis un seul classement par intervalles (même seuils que par bande).
+  final ratiosForMean = <double>[
+    if (lowRatio != null) lowRatio,
+    if (midRatio != null) midRatio,
+    if (highRatio != null) highRatio,
   ];
-
-  final hasInfected = states.contains(_BandState.infected);
-  final hasWound = states.contains(_BandState.wound);
-
-  if (hasInfected) {
-    return WoundStatusResult(
-      label: 'Critique',
-      message:
-          'Risque d\'infection détecté. Consultez rapidement un médecin.',
-      color: Colors.red,
-      icon: Icons.warning,
-      emoji: '🚨',
-      lastUpdate: lastUpdate,
-      bandRatios: {'low': lowRatio, 'mid': midRatio, 'high': highRatio},
-    );
+  if (ratiosForMean.isEmpty) {
+    return null;
   }
+  final meanR =
+      ratiosForMean.reduce((a, b) => a + b) / ratiosForMean.length;
+  final globalState = _classifyRatio(meanR);
 
-  if (hasWound) {
-    return WoundStatusResult(
-      label: 'À surveiller',
-      message:
-          'Anomalie de plaie détectée. Surveillance recommandée.',
-      color: Colors.orange,
-      icon: Icons.info_outline,
-      emoji: '👀',
-      lastUpdate: lastUpdate,
-      bandRatios: {'low': lowRatio, 'mid': midRatio, 'high': highRatio},
-    );
+  final bandRatios = <String, double?>{
+    'low': lowRatio,
+    'mid': midRatio,
+    'high': highRatio,
+    'mean': meanR,
+  };
+
+  switch (globalState) {
+    case _BandState.infected:
+      return WoundStatusResult(
+        label: 'Critique',
+        message:
+            'Risque d\'infection détecté. Consultez rapidement un médecin.',
+        color: Colors.red,
+        icon: Icons.warning,
+        emoji: '🚨',
+        lastUpdate: lastUpdate,
+        bandRatios: bandRatios,
+      );
+    case _BandState.wound:
+      return WoundStatusResult(
+        label: 'À surveiller',
+        message:
+            'Anomalie de plaie détectée. Surveillance recommandée.',
+        color: Colors.orange,
+        icon: Icons.info_outline,
+        emoji: '👀',
+        lastUpdate: lastUpdate,
+        bandRatios: bandRatios,
+      );
+    case _BandState.healthy:
+      return WoundStatusResult(
+        label: 'Bon',
+        message: 'Impédance dans la plage attendue de peau saine.',
+        color: Colors.green,
+        icon: Icons.check_circle,
+        emoji: '✅',
+        lastUpdate: lastUpdate,
+        bandRatios: bandRatios,
+      );
   }
-
-  return WoundStatusResult(
-    label: 'Bon',
-    message: 'Impédance dans la plage attendue de peau saine.',
-    color: Colors.green,
-    icon: Icons.check_circle,
-    emoji: '✅',
-    lastUpdate: lastUpdate,
-    bandRatios: {'low': lowRatio, 'mid': midRatio, 'high': highRatio},
-  );
 }
 
 /// Calcule l'état global de la plaie à partir des mesures.
@@ -184,7 +197,7 @@ WoundStatusResult calculateWoundStatus(List<Measurement> measurements) {
   );
 }
 
-/// Étiquette courte pour affichage patient ("État normal" pour Bon/Excellent).
+/// Étiquette courte pour affichage patient ("État normal" pour Bon).
 String getWoundStatusDisplayLabel(WoundStatusResult status) {
   if (status.label == 'Bon' || status.label == 'Excellent') {
     return 'État normal';
@@ -249,6 +262,51 @@ List<StatusPoint> buildStatusHistory(List<Measurement> measurements) {
   return history;
 }
 
+/// Construit l'historique des états par session de mesure (scan à scan).
+///
+/// Une nouvelle session commence quand l'écart temporel entre 2 mesures
+/// consécutives dépasse [maxGapSeconds].
+List<StatusPoint> buildStatusHistoryBySession(
+  List<Measurement> measurements, {
+  int maxGapSeconds = 120,
+}) {
+  if (measurements.isEmpty) return [];
+
+  final sorted = [...measurements]
+    ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+  final sessions = <List<Measurement>>[];
+  var current = <Measurement>[sorted.first];
+
+  for (var i = 1; i < sorted.length; i++) {
+    final prev = sorted[i - 1];
+    final cur = sorted[i];
+    final gapSeconds = cur.timestamp.difference(prev.timestamp).inSeconds.abs();
+
+    if (gapSeconds <= maxGapSeconds) {
+      current.add(cur);
+    } else {
+      sessions.add(current);
+      current = <Measurement>[cur];
+    }
+  }
+
+  sessions.add(current);
+
+  final history = <StatusPoint>[];
+  for (final sessionMeasurements in sessions) {
+    final status = calculateWoundStatus(sessionMeasurements);
+    history.add(
+      StatusPoint(
+        date: sessionMeasurements.last.timestamp,
+        statusValue: getStatusValue(status.label),
+      ),
+    );
+  }
+
+  return history;
+}
+
 int getStatusValue(String label) {
   switch (label) {
     case 'Critique':
@@ -258,7 +316,7 @@ int getStatusValue(String label) {
     case 'Bon':
       return 2;
     case 'Excellent':
-      return 3;
+      return 2;
     default:
       return 1;
   }
@@ -273,7 +331,7 @@ String getStatusLabel(int value) {
     case 2:
       return 'Bon';
     case 3:
-      return 'Excellent';
+      return 'Bon';
     default:
       return '';
   }
@@ -289,7 +347,7 @@ String getStatusEmoji(int value) {
     case 2:
       return '✅';
     case 3:
-      return '🌟';
+      return '✅';
     default:
       return '';
   }

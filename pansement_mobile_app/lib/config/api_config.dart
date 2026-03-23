@@ -11,6 +11,8 @@ class ApiConfig {
   // Émulateur Android : utiliser http://10.0.2.2:8000/api/v1
   static const String _defaultUrl = 'http://192.168.1.200:8000/api/v1';
 
+  // static const String _defaultUrl = 'http://172.16.121.161:8000/api/v1';
+
   // URL de base - peut être changée dynamiquement (Paramètres > URL du serveur)
   static String _baseUrl = _defaultUrl;
 

@@ -207,7 +207,7 @@ class PatientDashboardScreen extends ConsumerWidget {
 
                     const SizedBox(height: 24),
 
-                    // État complet du patient (état de la plaie, résumé, évolution)
+                    // État de la plaie (courbe d'évolution seulement si ce n'est pas un patient)
                     if (user != null)
                       Card(
                         elevation: 2,
@@ -256,7 +256,9 @@ class PatientDashboardScreen extends ConsumerWidget {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        'État de la plaie, résumé et évolution',
+                                        user.role.toLowerCase() == 'patient'
+                                            ? 'État de la plaie et message détaillé'
+                                            : 'État de la plaie, résumé et évolution',
                                         style: TextStyle(
                                           fontSize: 14,
                                           color: Colors.grey[600],

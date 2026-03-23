@@ -27,7 +27,7 @@ class PatientWoundStatusScreen extends ConsumerStatefulWidget {
 
 class _PatientWoundStatusScreenState
     extends ConsumerState<PatientWoundStatusScreen> {
-  String _selectedTimeRange = '7'; // 7 jours par défaut
+  String _selectedTimeRange = '1'; // 1 jour par défaut
   bool _didInvalidateOnOpen = false;
   List<Measurement>? _demoOverrideMeasurements; // Presentation only
 
@@ -56,86 +56,119 @@ class _PatientWoundStatusScreenState
               : 'État de ma plaie',
         ),
         actions: [
-          // Afficher la période actuelle pour confirmer que le filtre est appliqué
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: Text(
-                _selectedTimeRange == '7'
-                    ? '7 j'
-                    : _selectedTimeRange == '30'
-                        ? '30 j'
-                        : '90 j',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Theme.of(context).appBarTheme.foregroundColor?.withOpacity(0.9),
+          // Période / graphique : uniquement pour le médecin.
+          if (widget.forMedecin) ...[
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: Text(
+                  _selectedTimeRange == '1'
+                      ? '1 j'
+                      : _selectedTimeRange == '3'
+                          ? '3 j'
+                          : '7 j',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Theme.of(context)
+                        .appBarTheme
+                        .foregroundColor
+                        ?.withOpacity(0.9),
+                  ),
                 ),
               ),
             ),
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.calendar_today),
-            tooltip: 'Changer la période',
-            onSelected: (value) {
-              if (value != _selectedTimeRange) {
-                setState(() {
-                  _selectedTimeRange = value;
-                });
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: '7',
-                child: Row(
-                  children: [
-                    if (_selectedTimeRange == '7') Icon(Icons.check, size: 20, color: Theme.of(context).primaryColor),
-                    if (_selectedTimeRange == '7') const SizedBox(width: 8),
-                    const Text('7 derniers jours'),
-                  ],
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.calendar_today),
+              tooltip: 'Changer la période',
+              onSelected: (value) {
+                if (value != _selectedTimeRange) {
+                  setState(() {
+                    _selectedTimeRange = value;
+                  });
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: '1',
+                  child: Row(
+                    children: [
+                      if (_selectedTimeRange == '1')
+                        Icon(Icons.check,
+                            size: 20,
+                            color: Theme.of(context).primaryColor),
+                      if (_selectedTimeRange == '1') const SizedBox(width: 8),
+                      const Text('Dernières 24 heures'),
+                    ],
+                  ),
                 ),
-              ),
-              PopupMenuItem(
-                value: '30',
-                child: Row(
-                  children: [
-                    if (_selectedTimeRange == '30') Icon(Icons.check, size: 20, color: Theme.of(context).primaryColor),
-                    if (_selectedTimeRange == '30') const SizedBox(width: 8),
-                    const Text('30 derniers jours'),
-                  ],
+                PopupMenuItem(
+                  value: '3',
+                  child: Row(
+                    children: [
+                      if (_selectedTimeRange == '3')
+                        Icon(Icons.check,
+                            size: 20,
+                            color: Theme.of(context).primaryColor),
+                      if (_selectedTimeRange == '3') const SizedBox(width: 8),
+                      const Text('3 derniers jours'),
+                    ],
+                  ),
                 ),
-              ),
-              PopupMenuItem(
-                value: '90',
-                child: Row(
-                  children: [
-                    if (_selectedTimeRange == '90') Icon(Icons.check, size: 20, color: Theme.of(context).primaryColor),
-                    if (_selectedTimeRange == '90') const SizedBox(width: 8),
-                    const Text('90 derniers jours'),
-                  ],
+                PopupMenuItem(
+                  value: '7',
+                  child: Row(
+                    children: [
+                      if (_selectedTimeRange == '7')
+                        Icon(Icons.check,
+                            size: 20,
+                            color: Theme.of(context).primaryColor),
+                      if (_selectedTimeRange == '7') const SizedBox(width: 8),
+                      const Text('7 derniers jours'),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
       body: measurementsAsync.when(
         data: (allMeasurements) {
-          // Filtrer par période
+          // Aligné sur le tableau de bord : la carte d'état utilise toutes les mesures.
+          final measurementsForGlobalStatus =
+              _demoOverrideMeasurements ?? allMeasurements;
+          final woundStatus = calculateWoundStatus(measurementsForGlobalStatus);
+
           final now = DateTime.now();
-          final days = int.parse(_selectedTimeRange);
-          final cutoffDate = now.subtract(Duration(days: days));
-          final filteredMeasurements = allMeasurements
-              .where((m) => m.timestamp.isAfter(cutoffDate))
-              .toList();
-
-          final effectiveMeasurements =
-              _demoOverrideMeasurements ?? filteredMeasurements;
-
-          // Calcul local:
-          // - état global synthétique,
-          // - historique temporel pour les courbes.
-          final woundStatus = calculateWoundStatus(effectiveMeasurements);
-          final statusHistory = buildStatusHistory(effectiveMeasurements);
+          // Historique / courbe : uniquement pour le médecin (fenêtre 1/3/7 j).
+          final List<StatusPoint> statusHistory;
+          if (widget.forMedecin) {
+            final days = int.parse(_selectedTimeRange);
+            final cutoffDate = now.subtract(Duration(days: days));
+            final filteredMeasurements = allMeasurements
+                .where((m) => m.timestamp.isAfter(cutoffDate))
+                .toList();
+            final measurementsForHistory =
+                _demoOverrideMeasurements ?? filteredMeasurements;
+            final historyBySession = buildStatusHistoryBySession(
+              measurementsForHistory,
+              maxGapSeconds: 120,
+            );
+            // Logique métier: la courbe reflète l'état global courant affiché sur la carte.
+            if (historyBySession.isNotEmpty) {
+              final currentStatusValue = getStatusValue(woundStatus.label);
+              statusHistory = historyBySession
+                  .map((p) => StatusPoint(
+                        date: p.date,
+                        statusValue: currentStatusValue,
+                      ))
+                  .toList();
+            } else {
+              statusHistory = historyBySession;
+            }
+          } else {
+            statusHistory = [];
+          }
 
           return RefreshIndicator(
             onRefresh: () async {
@@ -148,11 +181,44 @@ class _PatientWoundStatusScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                // Vue médecin : on affiche uniquement l'état (carte) et pas les courbes.
-                if (widget.forMedecin) ...[
-                  // Rien à afficher ici: la carte d'état est en dehors de ce bloc.
+                if (!widget.forMedecin &&
+                    kDebugMode &&
+                    _demoOverrideMeasurements != null) ...[
+                  Material(
+                    color: Colors.amber.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                    elevation: 1,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.amber.shade900,
+                            size: 28,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Mode démonstration actif : ce que vous voyez '
+                              'ne correspond pas à vos vraies mesures. '
+                              'Ouvrez « Outils développeur (démo) » puis touchez « Annuler la démo ».',
+                              style: TextStyle(
+                                color: Colors.amber.shade900,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                 ],
-                // Carte de résumé (message principal affiché à l'utilisateur).
+                // Carte de résumé (calcul à partir des mesures collectées).
                 Card(
                   elevation: 4,
                   shape: RoundedRectangleBorder(
@@ -173,52 +239,81 @@ class _PatientWoundStatusScreenState
                     ),
                     child: Column(
                       children: [
-                        // Boutons de démo: uniquement côté patient (pour ne pas
-                        // polluer l'UI médecin).
+                        // Démo : uniquement build debug, repliée pour éviter les appuis accidentels.
                         if (!widget.forMedecin && kDebugMode) ...[
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: Wrap(
-                              spacing: 8,
-                              children: [
-                                ElevatedButton.icon(
-                                  onPressed: () {
-                                    setState(() {
-                                      _demoOverrideMeasurements =
-                                          _buildDemoCriticalImpedanceMeasurements(
-                                        now,
-                                      );
-                                    });
-                                  },
-                                  icon: const Icon(Icons.bug_report),
-                                  label: const Text('Démo Critique'),
-                                ),
-                                ElevatedButton.icon(
-                                  onPressed: () {
-                                    setState(() {
-                                      _demoOverrideMeasurements =
-                                          _buildDemoSurveillanceImpedanceMeasurements(
-                                        now,
-                                      );
-                                    });
-                                  },
-                                  icon: const Icon(Icons.warning_amber_outlined),
-                                  label: const Text('Démo À surveiller'),
-                                ),
-                                if (_demoOverrideMeasurements != null)
-                                  OutlinedButton.icon(
-                                    onPressed: () {
-                                      setState(() {
-                                        _demoOverrideMeasurements = null;
-                                      });
-                                    },
-                                    icon: const Icon(Icons.close),
-                                    label: const Text('Annuler'),
-                                  ),
-                              ],
+                          ExpansionTile(
+                            initiallyExpanded: false,
+                            leading: const Icon(Icons.developer_mode, size: 22),
+                            title: Text(
+                              'Outils développeur (démo)',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey[800],
+                              ),
                             ),
+                            subtitle: Text(
+                              _demoOverrideMeasurements != null
+                                  ? 'Données factices actives — touchez Annuler'
+                                  : 'Simuler un état pour les tests',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16, 0, 16, 12,
+                                ),
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  alignment: WrapAlignment.end,
+                                  children: [
+                                    ElevatedButton.icon(
+                                      onPressed: () {
+                                        setState(() {
+                                          _demoOverrideMeasurements =
+                                              _buildDemoCriticalImpedanceMeasurements(
+                                            now,
+                                          );
+                                        });
+                                      },
+                                      icon: const Icon(Icons.bug_report, size: 18),
+                                      label: const Text('Démo Critique'),
+                                    ),
+                                    ElevatedButton.icon(
+                                      onPressed: () {
+                                        setState(() {
+                                          _demoOverrideMeasurements =
+                                              _buildDemoSurveillanceImpedanceMeasurements(
+                                            now,
+                                          );
+                                        });
+                                      },
+                                      icon: const Icon(
+                                        Icons.warning_amber_outlined,
+                                        size: 18,
+                                      ),
+                                      label: const Text('Démo À surveiller'),
+                                    ),
+                                    if (_demoOverrideMeasurements != null)
+                                      OutlinedButton.icon(
+                                        onPressed: () {
+                                          setState(() {
+                                            _demoOverrideMeasurements = null;
+                                          });
+                                        },
+                                        icon: const Icon(Icons.close, size: 18),
+                                        label: const Text('Annuler la démo'),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 8),
                         ],
                         Icon(
                           woundStatus.icon,
@@ -227,7 +322,9 @@ class _PatientWoundStatusScreenState
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          '${woundStatus.label} ${woundStatus.emoji}',
+                          widget.forMedecin
+                              ? '${woundStatus.label} ${woundStatus.emoji}'
+                              : '${getWoundStatusDisplayLabel(woundStatus)} ${woundStatus.emoji}',
                           style: Theme.of(context)
                               .textTheme
                               .headlineMedium
@@ -271,8 +368,8 @@ class _PatientWoundStatusScreenState
                   ),
                 ),
 
-                // Graphique d'évolution (affiché aussi pour le médecin)
-                ...[
+                // Graphique d'évolution : réservé au médecin.
+                if (widget.forMedecin) ...[
                   const SizedBox(height: 32),
                   Text(
                     'Évolution de l\'état',
@@ -282,7 +379,7 @@ class _PatientWoundStatusScreenState
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Courbe jour par jour (🚨 Critique, 👀 Surveiller, ✅ Bon, 🌟 Excellent)',
+                    'Courbe jour par jour (🚨 Critique, 👀 Surveiller, ✅ Bon)',
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey[600],
@@ -315,7 +412,7 @@ class _PatientWoundStatusScreenState
                               if (allMeasurements.isEmpty) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  'Les mesures apparaîtront ici une fois que votre pansement sera connecté et actif.',
+                                  'Les mesures apparaîtront ici une fois que le pansement sera connecté et actif.',
                                   style: TextStyle(
                                     color: Colors.grey[500],
                                     fontSize: 12,
@@ -672,16 +769,13 @@ class _PatientWoundStatusScreenState
                     interval: 1,
                     getTitlesWidget: (value, meta) {
                       final v = value.toInt();
-                      if (v < 0 || v > 3) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8.0),
-                        child: Text(
-                          '${getStatusEmoji(v)} ${getStatusLabel(v)}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[800],
-                            fontWeight: FontWeight.w500,
-                          ),
+                      if (v < 0 || v > 2) return const SizedBox.shrink();
+                      return Text(
+                        '${getStatusEmoji(v)} ${getStatusLabel(v)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[800],
+                          fontWeight: FontWeight.w500,
                         ),
                       );
                     },
@@ -746,7 +840,7 @@ class _PatientWoundStatusScreenState
                 ),
               ],
               minY: 0,
-              maxY: 3,
+              maxY: 2,
             ),
           ),
         ),

@@ -36,6 +36,9 @@ class BleService {
   Map<String, dynamic>? _lastNotificationMeasurements;
   /// Liste des points du balayage (freq, impedance, phase) pour courbe Bode
   final List<Map<String, dynamic>> _sweepPoints = [];
+  /// Buffer de réception binaire pour réassembler les paquets fragmentés
+  /// et traiter plusieurs paquets reçus dans une seule notification.
+  final List<int> _binaryReceiveBuffer = [];
   bool _isConnecting = false;
   /// True si setNotifyValue a échoué avec "Device is disconnected" (plus fiable que connectionState.first).
   bool _notifyFailedBecauseDisconnected = false;
@@ -470,7 +473,7 @@ class BleService {
       debugPrint("🔴 RAW DATA (${data.length} bytes): $data");
 
       final measurements = data.length >= 12 && data[0] != 0x7b /* '{' */
-          ? _parseBinaryPacket(data)
+          ? _handleBinaryStreamData(data)
           : _parseJsonPacket(data);
 
       if (measurements != null) {
@@ -486,6 +489,37 @@ class BleService {
       debugPrint("Données brutes (length=${data.length}): ${data.take(32).toList()}");
       onError?.call("Erreur de décodage: $e");
     }
+  }
+
+  /// Traite un flux binaire BLE composé de paquets de 12 octets:
+  /// [uint32 freq][float impedance][float phase] en little-endian.
+  ///
+  /// Gère:
+  /// - les paquets fragmentés (ex: 8 + 4 octets sur 2 notifications),
+  /// - les paquets concaténés (ex: 24, 36, 48 octets en une notification).
+  Map<String, dynamic>? _handleBinaryStreamData(List<int> data) {
+    _binaryReceiveBuffer.addAll(data);
+    Map<String, dynamic>? lastParsed;
+
+    while (_binaryReceiveBuffer.length >= 12) {
+      final packet = _binaryReceiveBuffer.sublist(0, 12);
+      _binaryReceiveBuffer.removeRange(0, 12);
+
+      final parsed = _parseBinaryPacket(packet);
+      if (parsed != null) {
+        lastParsed = parsed;
+        _lastNotificationMeasurements = parsed;
+        onDataReceived?.call(parsed);
+      }
+    }
+
+    if (_binaryReceiveBuffer.isNotEmpty) {
+      debugPrint(
+        "🧩 Buffer partiel conservé: ${_binaryReceiveBuffer.length} octets",
+      );
+    }
+
+    return lastParsed;
   }
 
   /// Paquet binaire 12 octets (nRF): freq (uint32), z_val (float), phase (float), little-endian.
@@ -590,7 +624,7 @@ class BleService {
       }
 
       final measurements = data.length >= 12 && data[0] != 0x7b
-          ? _parseBinaryPacket(data)
+          ? _handleBinaryStreamData(data)
           : _parseJsonPacket(data);
       if (measurements != null) {
         _lastNotificationMeasurements = measurements;
@@ -672,6 +706,7 @@ class BleService {
     _readNotPermittedLogged = false;
     _lastNotificationMeasurements = null;
     _notifyFailedBecauseDisconnected = false;
+    _binaryReceiveBuffer.clear();
     clearSweepPoints();
   }
 

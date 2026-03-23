@@ -44,8 +44,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
     final user = authState.user;
-    // Médecin/admin : forMedecin = true (pas de graphe, détail impédance visible).
-    // Patient : forMedecin = false (graphe visible, détail impédance masqué).
+    // Médecin/admin : forMedecin = true (courbe d'évolution sur l'écran plaie).
+    // Patient : forMedecin = false (écran plaie sans courbe, carte d'état seule).
     final bool forMedecinScreen =
         user != null && user.role.toLowerCase() != 'patient';
     final statsAsync = ref.watch(dashboardStatsProvider);
